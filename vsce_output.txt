@@ -1,0 +1,10 @@
+﻿Executing prepublish script 'npm run vscode:prepublish'...
+
+> cliosoft-sos-manager@0.0.1 vscode:prepublish
+> npm run compile
+
+
+> cliosoft-sos-manager@0.0.1 compile
+> tsc -p ./
+
+ DONE  Packaged: D:\鍒嗘敮椤圭洰\pdet_opz\cliosoft-sos-manager-0.0.1.vsix (38 files, 101.17KB)
