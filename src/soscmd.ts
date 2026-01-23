@@ -313,7 +313,7 @@ export async function getFileStatus(filePath: string): Promise<FileStatus | null
         // 获取文件所在目录作为工作目录，使用相对路径调用soscmd status
         const fileDir = path.dirname(filePath);
         const fileName = path.basename(filePath);
-        const command = `soscmd status "${fileName}"`;
+        const command = `soscmd status ${fileName}`;
         
         if (isDebugEnabled()) {
             console.log(`[DEBUG] Building status command: ${command}`);

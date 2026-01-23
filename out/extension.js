@@ -36,24 +36,284 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
+const path = __importStar(require("path"));
 const soscmd_1 = require("./soscmd");
 const utils_1 = require("./utils");
+// 定义文件版本树节点
+class FileVersionItem extends vscode.TreeItem {
+    constructor(version, filePath, isCurrent = false, collapsibleState = vscode.TreeItemCollapsibleState.None) {
+        super(version ? version.id : 'No versions', collapsibleState);
+        this.version = version;
+        this.filePath = filePath;
+        this.isCurrent = isCurrent;
+        if (version === null) {
+            this.tooltip = 'No versions available';
+            this.description = '';
+            this.contextValue = 'noVersions';
+            this.iconPath = 'info';
+        }
+        else {
+            this.tooltip = `Version ${version.id} - ${version.ciBy} - ${version.ciTime}`;
+            this.description = isCurrent ? 'Current' : '';
+            this.contextValue = 'fileVersion';
+            if (isCurrent) {
+                this.iconPath = new vscode.ThemeIcon('check');
+                this.description = 'Current';
+            }
+            else {
+                this.iconPath = new vscode.ThemeIcon('circle-outline');
+            }
+            this.command = {
+                title: 'Switch to This Version',
+                command: 'cliosoft-sos-manager.switchVersion',
+                arguments: [filePath, version]
+            };
+        }
+    }
+}
+// 文件版本树数据提供程序
+class FileVersionsTreeDataProvider {
+    constructor() {
+        this._onDidChangeTreeData = new vscode.EventEmitter();
+        this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+        this.currentFilePath = null;
+        this.currentFileStatus = null;
+    }
+    refresh() {
+        this._onDidChangeTreeData.fire(null);
+    }
+    async setFile(filePath) {
+        this.currentFilePath = filePath;
+        this.currentFileStatus = await (0, soscmd_1.getFileStatus)(filePath);
+        if ((0, utils_1.isDebugEnabled)()) {
+            console.log(`[DEBUG] File set to: ${filePath}`);
+            console.log(`[DEBUG] File status: ${JSON.stringify(this.currentFileStatus)}`);
+        }
+        this.refresh();
+    }
+    getTreeItem(element) {
+        return element;
+    }
+    async getChildren(element) {
+        var _a;
+        if ((0, utils_1.isDebugEnabled)()) {
+            console.log(`[DEBUG] getChildren called with element: ${element === null || element === void 0 ? void 0 : element.label}`);
+        }
+        if (!element) {
+            if (!this.currentFilePath) {
+                if ((0, utils_1.isDebugEnabled)()) {
+                    console.log('[DEBUG] No file selected, returning noVersions item');
+                }
+                return [new FileVersionItem(null, null, false)];
+            }
+            if ((0, utils_1.isDebugEnabled)()) {
+                console.log(`[DEBUG] Active file: ${this.currentFilePath}`);
+            }
+            const versions = await (0, soscmd_1.getFileVersions)(this.currentFilePath);
+            if ((0, utils_1.isDebugEnabled)()) {
+                console.log(`[DEBUG] getFileVersions returned ${versions.length} versions`);
+            }
+            if (versions.length === 0) {
+                if ((0, utils_1.isDebugEnabled)()) {
+                    console.log(`[DEBUG] No versions found, returning noVersions item`);
+                }
+                return [new FileVersionItem(null, this.currentFilePath, false)];
+            }
+            if ((0, utils_1.isDebugEnabled)()) {
+                console.log(`[DEBUG] Creating FileVersionItems for ${versions.length} versions`);
+            }
+            const currentRevision = ((_a = this.currentFileStatus) === null || _a === void 0 ? void 0 : _a.revision) || '';
+            return versions.map(version => new FileVersionItem(version, this.currentFilePath, version.id === currentRevision));
+        }
+        return [];
+    }
+}
 function activate(context) {
     if ((0, utils_1.isDebugEnabled)()) {
         console.log('[DEBUG] ClioSoft SOS Manager extension activating...');
         vscode.window.showInformationMessage('[DEBUG] ClioSoft SOS Manager extension activating...');
     }
-    // 初始化文件状态装饰器
-    fileStatusDecorator = new FileStatusDecorator();
-    // 定期刷新工作区根目录的状态（每5秒）
-    const statusRefreshInterval = setInterval(async () => {
-        fileStatusDecorator.updateWorkspaceFoldersStatus();
-    }, 5000);
-    // 监听文件系统变化，更新状态
-    context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
-        fileStatusDecorator.updateWorkspaceFoldersStatus();
+    const treeDataProvider = new FileVersionsTreeDataProvider();
+    if ((0, utils_1.isDebugEnabled)()) {
+        console.log('[DEBUG] Tree data provider created');
+    }
+    vscode.window.registerTreeDataProvider('cliosoft-sos-manager.fileVersions', treeDataProvider);
+    if ((0, utils_1.isDebugEnabled)()) {
+        console.log('[DEBUG] Tree view provider registered');
+    }
+    context.subscriptions.push(vscode.commands.registerCommand('cliosoft-sos-manager.refreshVersions', () => {
+        if ((0, utils_1.isDebugEnabled)()) {
+            console.log('[DEBUG] Refresh versions command executed');
+            vscode.window.showInformationMessage('[DEBUG] Refresh versions command executed');
+        }
+        treeDataProvider.refresh();
     }));
-    // 添加清理任务
+    if ((0, utils_1.isDebugEnabled)()) {
+        console.log('[DEBUG] Refresh command registered');
+    }
+    context.subscriptions.push(vscode.commands.registerCommand('cliosoft-sos-manager.switchVersion', async (filePath, version) => {
+        if ((0, utils_1.isDebugEnabled)()) {
+            console.log(`[DEBUG] Switch version command executed with filePath: ${filePath}, version: ${version === null || version === void 0 ? void 0 : version.id}`);
+            vscode.window.showInformationMessage(`[DEBUG] Switch version command: ${filePath} -> v${version === null || version === void 0 ? void 0 : version.id}`);
+        }
+        if (filePath && version) {
+            if ((0, utils_1.isDebugEnabled)()) {
+                console.log(`[DEBUG] Calling switchFileVersion for ${filePath} with version ${version.id}`);
+            }
+            await (0, soscmd_1.switchFileVersion)(filePath, version.id);
+            if ((0, utils_1.isDebugEnabled)()) {
+                console.log(`[DEBUG] Re-fetching file status after version switch`);
+            }
+            await treeDataProvider.setFile(filePath);
+            if ((0, utils_1.isDebugEnabled)()) {
+                console.log(`[DEBUG] Refreshing tree after version switch`);
+            }
+        }
+        else {
+            console.error(`[ERROR] Invalid parameters for switchVersion: filePath=${filePath}, version=${version}`);
+        }
+    }));
+    if ((0, utils_1.isDebugEnabled)()) {
+        console.log('[DEBUG] Switch version command registered');
+    }
+    context.subscriptions.push(vscode.commands.registerCommand('cliosoft-sos-manager.checkout', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+            const filePath = editor.document.uri.fsPath;
+            const fileDir = path.dirname(filePath);
+            const fileName = path.basename(filePath);
+            if ((0, utils_1.isDebugEnabled)()) {
+                console.log(`[DEBUG] Checkout command executed for: ${filePath}`);
+            }
+            const command = `soscmd co -Nlock ${filePath}`;
+            await (0, soscmd_1.executeSoscmd)(command, fileDir);
+            vscode.window.showInformationMessage(`Checked out: ${fileName}`);
+        }
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('cliosoft-sos-manager.checkin', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+            const filePath = editor.document.uri.fsPath;
+            const fileDir = path.dirname(filePath);
+            const fileName = path.basename(filePath);
+            if ((0, utils_1.isDebugEnabled)()) {
+                console.log(`[DEBUG] Checkin command executed for: ${filePath}`);
+            }
+            const comments = await vscode.window.showInputBox({
+                prompt: 'Enter check-in comments',
+                placeHolder: 'Describe your changes...',
+                validateInput: (value) => {
+                    if (!value || value.trim().length === 0) {
+                        return 'Comments cannot be empty';
+                    }
+                    return null;
+                }
+            });
+            if (!comments) {
+                return;
+            }
+            const command = `soscmd ci -aLog=${comments} ${filePath}`;
+            await (0, soscmd_1.executeSoscmd)(command, fileDir);
+            vscode.window.showInformationMessage(`Checked in: ${fileName}`);
+        }
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('cliosoft-sos-manager.diff', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+            const filePath = editor.document.uri.fsPath;
+            const fileDir = path.dirname(filePath);
+            const fileName = path.basename(filePath);
+            if ((0, utils_1.isDebugEnabled)()) {
+                console.log(`[DEBUG] Diff command executed for: ${filePath}`);
+            }
+            const command = `soscmd diff ${filePath}`;
+            await (0, soscmd_1.executeSoscmd)(command, fileDir);
+        }
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('cliosoft-sos-manager.discard', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+            const filePath = editor.document.uri.fsPath;
+            const fileDir = path.dirname(filePath);
+            const fileName = path.basename(filePath);
+            if ((0, utils_1.isDebugEnabled)()) {
+                console.log(`[DEBUG] Discard command executed for: ${filePath}`);
+            }
+            const selectedOption = await vscode.window.showQuickPick([
+                { label: 'Yes (discard all changes)', value: true },
+                { label: 'No (keep local changes)', value: false }
+            ], {
+                placeHolder: 'Do you want to use -F parameter to discard all changes?',
+                title: 'Discard Changes'
+            });
+            if (!selectedOption) {
+                return;
+            }
+            const useForce = selectedOption.value;
+            const command = `soscmd discard ${useForce ? '-F' : ''} ${filePath}`;
+            await (0, soscmd_1.executeSoscmd)(command, fileDir);
+            vscode.window.showInformationMessage(`Discarded: ${fileName}`);
+        }
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('cliosoft-sos-manager.officeOpen', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+            const filePath = editor.document.uri.fsPath;
+            const fileDir = path.dirname(filePath);
+            if ((0, utils_1.isDebugEnabled)()) {
+                console.log(`[DEBUG] Office open command executed for: ${filePath}`);
+            }
+            const command = `soffice ${filePath}`;
+            await (0, soscmd_1.executeSoscmd)(command, fileDir);
+        }
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('cliosoft-sos-manager.rebuildCtags', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (editor) {
+            const filePath = editor.document.uri.fsPath;
+            const fileDir = path.dirname(filePath);
+            if ((0, utils_1.isDebugEnabled)()) {
+                console.log(`[DEBUG] Rebuild ctags command executed for: ${filePath}`);
+            }
+            const command = `cd \${env:PROJ_ROOT} ; ctags -R --fields=+nKz -f .vscode/.tags --langmap=SystemVerilog:+.v+.sv -R --links=yes ./design_data/rtl ./design_data/testbench ./ref_ip`;
+            await (0, soscmd_1.executeSoscmd)(command, fileDir);
+        }
+    }));
+    context.subscriptions.push(vscode.commands.registerCommand('cliosoft-sos-manager.toggleRefresh', () => {
+        fileStatusDecorator.toggleRefresh();
+    }));
+    fileStatusDecorator = new FileStatusDecorator();
+    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor((editor) => {
+        if (editor && editor.document) {
+            fileStatusDecorator.updateFileAndAncestors(editor.document.uri.fsPath);
+            treeDataProvider.setFile(editor.document.uri.fsPath);
+        }
+    }));
+    context.subscriptions.push(vscode.workspace.onDidSaveTextDocument((document) => {
+        fileStatusDecorator.updateFileAndAncestors(document.uri.fsPath);
+    }));
+    context.subscriptions.push(vscode.workspace.onDidOpenTextDocument((document) => {
+        fileStatusDecorator.updateFileAndAncestors(document.uri.fsPath);
+    }));
+    const isLinux = process.platform === 'linux';
+    if (!isLinux) {
+        vscode.window.showWarningMessage('This extension is designed to run on Linux only. Some features may not work correctly.');
+    }
+    const statusRefreshInterval = setInterval(async () => {
+        if (!isLinux) {
+            return;
+        }
+        if (!vscode.window.state.focused) {
+            return;
+        }
+        const activeEditor = vscode.window.activeTextEditor;
+        if (activeEditor && activeEditor.document) {
+            fileStatusDecorator.updateFileAndAncestors(activeEditor.document.uri.fsPath);
+        }
+    }, 5000);
+    context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        fileStatusDecorator.clearCache();
+    }));
     context.subscriptions.push({
         dispose: () => {
             clearInterval(statusRefreshInterval);
@@ -70,14 +330,18 @@ function deactivate() {
         fileStatusDecorator.dispose();
     }
 }
-// 文件状态装饰器类
 class FileStatusDecorator {
     constructor() {
         this.statusCache = new Map();
         this.updatingFolders = new Set();
-        this.periodicUpdateInterval = 30000;
         this.maxConcurrentUpdates = 5;
         this.decorationChangeEmitter = new vscode.EventEmitter();
+        this.isPaused = false;
+        this.statusBarItem = vscode.window.createStatusBarItem('cliosoft-sos-manager.refreshToggle', vscode.StatusBarAlignment.Right, 100);
+        this.statusBarItem.text = '$(sync~spin) Refreshing...';
+        this.statusBarItem.command = 'cliosoft-sos-manager.toggleRefresh';
+        this.statusBarItem.tooltip = 'Click to pause/resume status refresh';
+        this.statusBarItem.show();
         this.fileDecorationProvider = {
             provideFileDecoration: (uri) => {
                 const filePath = uri.fsPath;
@@ -120,36 +384,62 @@ class FileStatusDecorator {
             onDidChangeFileDecorations: this.decorationChangeEmitter.event
         };
         this.fileDecorationProviderRegistration = vscode.window.registerFileDecorationProvider(this.fileDecorationProvider);
-        this.startPeriodicUpdates();
     }
-    startPeriodicUpdates() {
-        this.periodicUpdateTimer = setInterval(async () => {
-            await this.updateWorkspaceFoldersStatus();
-        }, this.periodicUpdateInterval);
+    toggleRefresh() {
+        this.isPaused = !this.isPaused;
+        if (this.isPaused) {
+            this.statusBarItem.text = '$(debug-pause) Paused';
+            this.statusBarItem.tooltip = 'Status refresh is paused. Click to resume.';
+        }
+        else {
+            this.statusBarItem.text = '$(sync~spin) Refreshing...';
+            this.statusBarItem.tooltip = 'Status refresh is active. Click to pause.';
+        }
     }
-    async updateWorkspaceFoldersStatus() {
+    async updateFileAndAncestors(filePath) {
+        if (this.isPaused) {
+            return;
+        }
         try {
             const workspaceFolders = vscode.workspace.workspaceFolders;
             if (!workspaceFolders || workspaceFolders.length === 0) {
                 return;
             }
-            if ((0, utils_1.isDebugEnabled)()) {
-                console.log(`[DEBUG] Updating ${workspaceFolders.length} workspace folders`);
+            const workspaceFolder = workspaceFolders.find(folder => filePath.startsWith(folder.uri.fsPath));
+            if (!workspaceFolder) {
+                return;
             }
-            const chunkSize = Math.min(this.maxConcurrentUpdates, workspaceFolders.length);
-            for (let i = 0; i < workspaceFolders.length; i += chunkSize) {
-                const chunk = workspaceFolders.slice(i, i + chunkSize);
-                await Promise.all(chunk.map(async (workspaceFolder) => {
-                    await this.updateFolderStatus(workspaceFolder.uri.fsPath);
+            const foldersToUpdate = [];
+            let currentPath = path.dirname(filePath);
+            const workspaceRoot = workspaceFolder.uri.fsPath;
+            while (currentPath && currentPath.length >= workspaceRoot.length) {
+                if (!path.basename(currentPath).startsWith('.')) {
+                    foldersToUpdate.push(currentPath);
+                }
+                const parentPath = path.dirname(currentPath);
+                if (parentPath === currentPath) {
+                    break;
+                }
+                currentPath = parentPath;
+            }
+            foldersToUpdate.push(workspaceRoot);
+            if ((0, utils_1.isDebugEnabled)()) {
+                console.log(`[DEBUG] Updating ${foldersToUpdate.length} ancestor folders: ${foldersToUpdate.join(', ')}`);
+            }
+            const chunkSize = Math.min(this.maxConcurrentUpdates, foldersToUpdate.length);
+            for (let i = 0; i < foldersToUpdate.length; i += chunkSize) {
+                const chunk = foldersToUpdate.slice(i, i + chunkSize);
+                await Promise.all(chunk.map(async (folderPath) => {
+                    await this.updateFolderStatus(folderPath);
                 }));
-                if (i + chunkSize < workspaceFolders.length) {
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                if (i + chunkSize < foldersToUpdate.length) {
+                    await new Promise(resolve => setTimeout(resolve, 200));
                 }
             }
         }
         catch (error) {
             if ((0, utils_1.isDebugEnabled)()) {
-                console.error(`[ERROR] Failed to update workspace folders status: ${error instanceof Error ? error.message : String(error)}`);
+                console.error(`[ERROR] Failed to update file and ancestors: ${error instanceof Error ? error.message : String(error)}`);
             }
         }
     }
@@ -204,6 +494,9 @@ class FileStatusDecorator {
             this.updatingFolders.delete(folderPath);
         }
     }
+    clearCache() {
+        this.statusCache.clear();
+    }
     dispose() {
         if (this.periodicUpdateTimer) {
             clearInterval(this.periodicUpdateTimer);
@@ -215,6 +508,9 @@ class FileStatusDecorator {
         if (this.fileDecorationProviderRegistration) {
             this.fileDecorationProviderRegistration.dispose();
             this.fileDecorationProviderRegistration = undefined;
+        }
+        if (this.statusBarItem) {
+            this.statusBarItem.dispose();
         }
     }
 }

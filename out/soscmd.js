@@ -303,7 +303,7 @@ async function getFileStatus(filePath) {
         // 获取文件所在目录作为工作目录，使用相对路径调用soscmd status
         const fileDir = path.dirname(filePath);
         const fileName = path.basename(filePath);
-        const command = `soscmd status "${fileName}"`;
+        const command = `soscmd status ${fileName}`;
         if ((0, utils_1.isDebugEnabled)()) {
             console.log(`[DEBUG] Building status command: ${command}`);
             console.log(`[DEBUG] Working directory: ${fileDir}`);

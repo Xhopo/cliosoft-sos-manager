@@ -2,10 +2,13 @@
   "name": "cliosoft-sos-manager",
   "displayName": "ClioSoft SOS Manager",
   "description": "VSCode extension for ClioSoft SOS Manager, allowing users to view and switch file versions",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "publisher": "xhopo",
   "author": "xhopo with trae",
-
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/cliosoft-sos-manager"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -13,6 +16,13 @@
     "Other"
   ],
   "activationEvents": [
+    "onCommand:cliosoft-sos-manager.checkout",
+    "onCommand:cliosoft-sos-manager.checkin",
+    "onCommand:cliosoft-sos-manager.diff",
+    "onCommand:cliosoft-sos-manager.discard",
+    "onCommand:cliosoft-sos-manager.officeOpen",
+    "onCommand:cliosoft-sos-manager.compileRtl",
+    "onCommand:cliosoft-sos-manager.rebuildCtags",
     "onView:cliosoft-sos-manager.fileVersions"
   ],
   "main": "./out/extension.js",
@@ -51,6 +61,11 @@
       {
         "command": "cliosoft-sos-manager.rebuildCtags",
         "title": "Rebuild ctags",
+        "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.toggleRefresh",
+        "title": "Toggle status refresh",
         "category": "ClioSoft SOS"
       }
     ],
@@ -95,7 +110,8 @@
       "activitybar": [
         {
           "id": "cliosoft-sos-manager",
-          "title": "ClioSoft SOS"
+          "title": "ClioSoft SOS",
+          "icon": "resources/cliosoft-icon.svg"
         }
       ]
     },
@@ -104,10 +120,6 @@
         {
           "id": "cliosoft-sos-manager.fileVersions",
           "name": "File Versions"
-        },
-        {
-          "id": "cliosoft-sos-manager.explorer",
-          "name": "Explorer"
         }
       ]
     },
