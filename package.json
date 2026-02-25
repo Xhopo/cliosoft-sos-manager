@@ -5,6 +5,7 @@
   "version": "0.0.3",
   "publisher": "xhopo",
   "author": "xhopo with trae",
+  "icon": "resources/cliosoft-icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/yourusername/cliosoft-sos-manager"
@@ -77,9 +78,19 @@
           "when": "resourceScheme == file"
         },
         {
+          "command": "cliosoft-sos-manager.checkout",
+          "group": "cliosoft-sos@1",
+          "when": "multipleResources"
+        },
+        {
           "command": "cliosoft-sos-manager.checkin",
           "group": "cliosoft-sos@2",
           "when": "resourceScheme == file"
+        },
+        {
+          "command": "cliosoft-sos-manager.checkin",
+          "group": "cliosoft-sos@2",
+          "when": "multipleResources"
         },
         {
           "command": "cliosoft-sos-manager.diff",
@@ -90,6 +101,11 @@
           "command": "cliosoft-sos-manager.discard",
           "group": "cliosoft-sos@4",
           "when": "resourceScheme == file"
+        },
+        {
+          "command": "cliosoft-sos-manager.discard",
+          "group": "cliosoft-sos@4",
+          "when": "multipleResources"
         },
         {
           "command": "cliosoft-sos-manager.officeOpen",
@@ -111,7 +127,7 @@
         {
           "id": "cliosoft-sos-manager",
           "title": "ClioSoft SOS",
-          "icon": "resources/cliosoft-icon.svg"
+          "icon": "resources/cliosoft-icon.png"
         }
       ]
     },
@@ -130,6 +146,76 @@
           "type": "boolean",
           "default": false,
           "description": "Enable debug information output in console and status bar"
+        },
+        "cliosoft-sos-manager.commands.checkout.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable checkout command in context menu"
+        },
+        "cliosoft-sos-manager.commands.checkout.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom checkout command"
+        },
+        "cliosoft-sos-manager.commands.checkin.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable checkin command in context menu"
+        },
+        "cliosoft-sos-manager.commands.checkin.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom checkin command"
+        },
+        "cliosoft-sos-manager.commands.diff.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable diff command in context menu"
+        },
+        "cliosoft-sos-manager.commands.diff.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom diff command"
+        },
+        "cliosoft-sos-manager.commands.discard.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable discard command in context menu"
+        },
+        "cliosoft-sos-manager.commands.discard.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom discard command"
+        },
+        "cliosoft-sos-manager.commands.officeOpen.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable officeOpen command in context menu"
+        },
+        "cliosoft-sos-manager.commands.officeOpen.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom officeOpen command"
+        },
+        "cliosoft-sos-manager.commands.compileRtl.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable compileRtl command in context menu"
+        },
+        "cliosoft-sos-manager.commands.compileRtl.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom compileRtl command"
+        },
+        "cliosoft-sos-manager.commands.rebuildCtags.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable rebuildCtags command in context menu"
+        },
+        "cliosoft-sos-manager.commands.rebuildCtags.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom rebuildCtags command"
         }
       }
     }

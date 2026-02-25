@@ -110,7 +110,7 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
             console.log(`[DEBUG] Building command: ${command}`);
         }
         
-        const output = await executeSoscmd(command, fileDir);
+        const output = await executeSoscmd(command, fileDir, false);
         
         // 检查文件是否在sos管理下
         if (output.includes('@@ Error: Client: No valid objects selected for \'history\' operation.')) {

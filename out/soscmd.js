@@ -116,7 +116,7 @@ async function getFileVersions(filePath) {
         if ((0, utils_1.isDebugEnabled)()) {
             console.log(`[DEBUG] Building command: ${command}`);
         }
-        const output = await executeSoscmd(command, fileDir);
+        const output = await executeSoscmd(command, fileDir, false);
         // 检查文件是否在sos管理下
         if (output.includes('@@ Error: Client: No valid objects selected for \'history\' operation.')) {
             // 文件不在sos管理下，返回空数组，不显示错误信息
