@@ -2,7 +2,7 @@
   "name": "cliosoft-sos-manager",
   "displayName": "ClioSoft SOS Manager",
   "description": "VSCode extension for ClioSoft SOS Manager, allowing users to view and switch file versions",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "xhopo",
   "author": "xhopo with trae",
   "icon": "resources/cliosoft-icon.png",

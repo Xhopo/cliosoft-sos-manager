@@ -33,16 +33,33 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.DEBUG_INFO_CONFIG_KEY = void 0;
+exports.outputChannel = exports.DEBUG_INFO_CONFIG_KEY = void 0;
 exports.isDebugEnabled = isDebugEnabled;
+exports.logDebug = logDebug;
+exports.logError = logError;
 exports.getSelectedFilePath = getSelectedFilePath;
-exports.executeCommand = executeCommand;
 const vscode = __importStar(require("vscode"));
 // 调试信息配置键
 exports.DEBUG_INFO_CONFIG_KEY = 'cliosoft-sos-manager.enableDebugInfo';
+// 创建输出通道
+exports.outputChannel = vscode.window.createOutputChannel('ClioSoft SOS');
 // 获取调试开关状态
 function isDebugEnabled() {
     return vscode.workspace.getConfiguration().get(exports.DEBUG_INFO_CONFIG_KEY, false);
+}
+// 调试日志函数
+function logDebug(message, ...args) {
+    if (isDebugEnabled()) {
+        const line = `[DEBUG ${new Date().toLocaleTimeString()}] ${message}`;
+        console.log(line, ...args);
+        exports.outputChannel.appendLine(line + (args.length ? ' ' + JSON.stringify(args) : ''));
+    }
+}
+// 错误日志函数
+function logError(message, error) {
+    const line = `[ERROR ${new Date().toLocaleTimeString()}] ${message}`;
+    console.error(line, error);
+    exports.outputChannel.appendLine(line + (error ? ' ' + error : ''));
 }
 // 获取当前选中的文件路径
 function getSelectedFilePath(context) {
@@ -55,21 +72,5 @@ function getSelectedFilePath(context) {
         return activeEditor.document.uri.fsPath;
     }
     return null;
-}
-// 执行命令的通用函数
-async function executeCommand(command, cwd) {
-    const { exec } = require('child_process');
-    return new Promise((resolve, reject) => {
-        exec(command, { cwd }, (error, stdout, stderr) => {
-            if (error) {
-                const errorMessage = `Command execution failed: ${error.message}\nCommand: ${command}\nstdout: ${stdout}\nstderr: ${stderr}`;
-                console.error(`[ERROR] ${errorMessage}`);
-                vscode.window.showErrorMessage(errorMessage);
-                reject(new Error(errorMessage));
-                return;
-            }
-            resolve();
-        });
-    });
 }
 //# sourceMappingURL=utils.js.map

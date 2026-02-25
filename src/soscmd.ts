@@ -1,7 +1,7 @@
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { isDebugEnabled } from './utils';
+import { isDebugEnabled, logDebug, logError } from './utils';
 
 // 定义文件版本接口
 export interface FileVersion {
@@ -26,62 +26,129 @@ export interface FileStatus {
 }
 
 // 执行soscmd命令
-export function executeSoscmd(command: string, cwd?: string, showError: boolean = true): Promise<string> {
+export function executeSoscmd(command: string, cwd?: string, showError?: boolean): Promise<string>;
+export function executeSoscmd(args: string[], cwd?: string, showError?: boolean): Promise<string>;
+export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, showError: boolean = true): Promise<string> {
     return new Promise((resolve, reject) => {
-        // 输出详细的调试信息到扩展控制台（仅在调试模式下）
-        if (isDebugEnabled()) {
-            console.log(`[DEBUG] Executing soscmd: ${command}`);
-            if (cwd) {
-                console.log(`[DEBUG] Working directory: ${cwd}`);
-            }
-            
-            // 也显示给用户
-            vscode.window.showInformationMessage(`[DEBUG] Executing: ${command}${cwd ? ` (cwd: ${cwd})` : ''}`);
-        }
-        
-        // 使用文件所在目录作为工作目录，确保soscmd能正确找到文件
-        exec(command, { cwd }, (error, stdout, stderr) => {
-            let errorMessage = '';
-            
-            // 记录命令输出到扩展控制台（仅在调试模式下）
+        if (Array.isArray(commandOrArgs)) {
+            // 使用spawn方式执行命令
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] Command stdout: ${stdout}`);
-                if (stderr) {
-                    console.log(`[DEBUG] Command stderr: ${stderr}`);
+                logDebug(`Executing soscmd with spawn: ${commandOrArgs.join(' ')}`);
+                if (cwd) {
+                    logDebug(`Working directory: ${cwd}`);
                 }
+                vscode.window.showInformationMessage(`[DEBUG] Executing: soscmd ${commandOrArgs.join(' ')}${cwd ? ` (cwd: ${cwd})` : ''}`);
             }
             
-            if (error) {
-                errorMessage = `soscmd execution failed: ${error.message}`;
-                // 添加更详细的调试信息
-                if (cwd) {
-                    errorMessage += ` (Working directory: ${cwd})`;
+            const proc = spawn('soscmd', commandOrArgs, { cwd, shell: true });
+            let stdout = '';
+            let stderr = '';
+            
+            proc.stdout.on('data', (data) => {
+                stdout += data.toString();
+                if (isDebugEnabled()) {
+                    logDebug(`stdout chunk: ${data.toString()}`);
                 }
-                errorMessage += `\nCommand: ${command}`;
-                errorMessage += `\nstdout: ${stdout}`;
-                errorMessage += `\nstderr: ${stderr}`;
+            });
+            
+            proc.stderr.on('data', (data) => {
+                stderr += data.toString();
+                if (isDebugEnabled()) {
+                    logDebug(`stderr chunk: ${data.toString()}`);
+                }
+            });
+            
+            proc.on('close', (code) => {
+                if (isDebugEnabled()) {
+                    logDebug(`Process exited with code: ${code}`);
+                    logDebug(`Full stdout: ${stdout}`);
+                    if (stderr) {
+                        logDebug(`Full stderr: ${stderr}`);
+                    }
+                }
                 
-                // 只在showError为true时显示错误信息
+                if (code !== 0) {
+                    const errorMessage = `soscmd execution failed with exit code ${code}\nCommand: soscmd ${commandOrArgs.join(' ')}\nstdout: ${stdout}\nstderr: ${stderr}`;
+                    if (showError) {
+                        logError(errorMessage);
+                        vscode.window.showErrorMessage(errorMessage);
+                    } else {
+                        logDebug(`Command failed (suppressed): soscmd ${commandOrArgs.join(' ')}`);
+                    }
+                    reject(new Error(errorMessage));
+                    return;
+                }
+                
+                if (stderr) {
+                    console.log(`[WARNING] Command completed with stderr: ${stderr}`);
+                }
+                
+                if (isDebugEnabled()) {
+                    logDebug(`Command executed successfully`);
+                }
+                resolve(stdout);
+            });
+            
+            proc.on('error', (error) => {
+                const errorMessage = `soscmd spawn error: ${error.message}`;
                 if (showError) {
-                    console.error(`[ERROR] ${errorMessage}`);
+                    logError(errorMessage);
                     vscode.window.showErrorMessage(errorMessage);
                 } else {
-                    console.log(`[DEBUG] Command failed (suppressed): ${command}`);
+                    logDebug(`Spawn error (suppressed): ${error.message}`);
                 }
                 reject(new Error(errorMessage));
-                return;
-            }
-            
-            if (stderr) {
-                // 有些soscmd命令可能会在stderr中输出警告信息，但仍然执行成功
-                console.log(`[WARNING] Command completed with stderr: ${stderr}`);
-            }
-            
+            });
+        } else {
+            // 使用exec方式执行命令
+            const command = commandOrArgs;
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] Command executed successfully`);
+                logDebug(`Executing soscmd: ${command}`);
+                if (cwd) {
+                    logDebug(`Working directory: ${cwd}`);
+                }
+                vscode.window.showInformationMessage(`[DEBUG] Executing: ${command}${cwd ? ` (cwd: ${cwd})` : ''}`);
             }
-            resolve(stdout);
-        });
+            
+            exec(command, { cwd }, (error, stdout, stderr) => {
+                let errorMessage = '';
+                
+                if (isDebugEnabled()) {
+                    logDebug(`Command stdout: ${stdout}`);
+                    if (stderr) {
+                        logDebug(`Command stderr: ${stderr}`);
+                    }
+                }
+                
+                if (error) {
+                    errorMessage = `soscmd execution failed: ${error.message}`;
+                    if (cwd) {
+                        errorMessage += ` (Working directory: ${cwd})`;
+                    }
+                    errorMessage += `\nCommand: ${command}`;
+                    errorMessage += `\nstdout: ${stdout}`;
+                    errorMessage += `\nstderr: ${stderr}`;
+                    
+                    if (showError) {
+                        logError(errorMessage);
+                        vscode.window.showErrorMessage(errorMessage);
+                    } else {
+                        logDebug(`Command failed (suppressed): ${command}`);
+                    }
+                    reject(new Error(errorMessage));
+                    return;
+                }
+                
+                if (stderr) {
+                    console.log(`[WARNING] Command completed with stderr: ${stderr}`);
+                }
+                
+                if (isDebugEnabled()) {
+                    console.log(`[DEBUG] Command executed successfully`);
+                }
+                resolve(stdout);
+            });
+        }
     });
 }
 
@@ -90,7 +157,7 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
     try {
         // 输出调试信息（仅在调试模式下）
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] getFileVersions called with filePath: ${filePath}`);
+            logDebug(`getFileVersions called with filePath: ${filePath}`);
             vscode.window.showInformationMessage(`[DEBUG] getFileVersions: ${filePath}`);
         }
         
@@ -99,15 +166,15 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
         const fileName = path.basename(filePath);
         
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] File directory: ${fileDir}`);
-            console.log(`[DEBUG] File name: ${fileName}`);
+            logDebug(`File directory: ${fileDir}`);
+            logDebug(`File name: ${fileName}`);
         }
         
         // 构建soscmd命令，查询文件版本
         const command = `soscmd history -fs "${filePath}"`;
         
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] Building command: ${command}`);
+            logDebug(`Building command: ${command}`);
         }
         
         const output = await executeSoscmd(command, fileDir, false);
@@ -116,7 +183,7 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
         if (output.includes('@@ Error: Client: No valid objects selected for \'history\' operation.')) {
             // 文件不在sos管理下，返回空数组，不显示错误信息
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] File ${fileName} is not under SOS control`);
+                logDebug(`File ${fileName} is not under SOS control`);
                 vscode.window.showInformationMessage(`[DEBUG] File ${fileName} is not under SOS control`);
             }
             return [];
@@ -128,8 +195,8 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
         const lines = output.split('\n');
         
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] Output lines count: ${lines.length}`);
-            console.log(`[DEBUG] Raw output: ${output}`);
+            logDebug(`Output lines count: ${lines.length}`);
+            logDebug(`Raw output: ${output}`);
         }
         
         // 查找包含"Action: checkin"的行，这些行包含版本信息
@@ -146,11 +213,11 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
                         changeSummary: changeSummary.trim()
                     });
                     if (isDebugEnabled()) {
-                        console.log(`[DEBUG] Found version: ID=${id.trim()}, By=${ciBy.trim()}, Time=${ciTime.trim()}`);
+                        logDebug(`Found version: ID=${id.trim()}, By=${ciBy.trim()}, Time=${ciTime.trim()}`);
                     }
                 } else {
                     if (isDebugEnabled()) {
-                        console.log(`[DEBUG] Line matched but failed to parse: ${line}`);
+                        logDebug(`Line matched but failed to parse: ${line}`);
                         vscode.window.showWarningMessage(`[DEBUG] Failed to parse version line: ${line}`);
                     }
                 }
@@ -158,22 +225,22 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
         }
         
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] Found ${versions.length} versions`);
+            logDebug(`Found ${versions.length} versions`);
             vscode.window.showInformationMessage(`[DEBUG] Found ${versions.length} versions for ${fileName}`);
         }
         return versions;
     } catch (error) {
         // 详细的错误记录（仅在调试模式下记录堆栈跟踪）
         if (isDebugEnabled()) {
-            console.error(`[ERROR] getFileVersions failed: ${error instanceof Error ? error.message : String(error)}`);
-            console.error(`[ERROR] Stack trace: ${error instanceof Error ? error.stack : ''}`);
+            logError(`getFileVersions failed: ${error instanceof Error ? error.message : String(error)}`);
+            logError(`Stack trace: ${error instanceof Error ? error.stack : ''}`);
         }
         
         // 检查是否是文件不在sos管理下的错误
         if (error instanceof Error && error.message.includes('No valid objects selected for \'history\' operation')) {
             // 文件不在sos管理下，返回空数组，不显示错误信息
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] File is not under SOS control (from error)`);
+                logDebug(`File is not under SOS control (from error)`);
             }
             return [];
         }
@@ -188,7 +255,7 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
 export function parseStatusLine(statusLine: string): FileStatus | null {
     // 输出原始状态行，便于调试
     if (isDebugEnabled()) {
-        console.log(`[DEBUG] Parsing status line: ${statusLine}`);
+        logDebug(`Parsing status line: ${statusLine}`);
     }
     
     // 尝试将制表符替换为空格，便于正则表达式匹配
@@ -278,6 +345,38 @@ export function parseStatusLine(statusLine: string): FileStatus | null {
         return fileStatus;
     }
     
+    // 最终降级处理：按空格分割，启发式匹配
+    const parts = normalizedLine.trim().split(/\s+/);
+    if (parts.length >= 2) {
+        if (isDebugEnabled()) {
+            logDebug(`Using fallback parsing with ${parts.length} parts: ${parts.join('|')}`);
+        }
+        
+        // 假设前6个字符是状态码，后面是版本号和路径
+        const statusCode = parts[0].padEnd(6, '-');
+        const version = parts[1];
+        const filePath = parts.slice(2).join(' ');
+        
+        const fileStatus: FileStatus = {
+            type: statusCode[0] || '-',
+            state: statusCode[1] || '-',
+            change: statusCode[2] || '-',
+            lock: statusCode[3] || '-',
+            newRevision: statusCode[4] || '-',
+            revision: version,
+            path: filePath,
+            author: '',
+            time: '',
+            log: ''
+        };
+        
+        if (isDebugEnabled()) {
+            logDebug(`Fallback parsing result: ${JSON.stringify(fileStatus)}`);
+        }
+        
+        return fileStatus;
+    }
+    
     // 如果所有匹配都失败，打印详细信息
     if (isDebugEnabled()) {
         console.log(`[DEBUG] Failed to parse status line: "${statusLine}"`);
@@ -290,13 +389,13 @@ export async function getFileStatus(filePath: string): Promise<FileStatus | null
     try {
         // 输出调试信息（仅在调试模式下）
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] getFileStatus called with filePath: ${filePath}`);
+            logDebug(`getFileStatus called with filePath: ${filePath}`);
         }
         
         // 跳过VSCode内部文件和不存在的文件
         if (filePath.includes('sharedprocess') || filePath.includes('vscode-extension-host') || !filePath.includes('/') && !filePath.includes(':')) {
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] Skipping non-file: ${filePath}`);
+                logDebug(`Skipping non-file: ${filePath}`);
             }
             return null;
         }
@@ -305,7 +404,7 @@ export async function getFileStatus(filePath: string): Promise<FileStatus | null
         const fs = require('fs');
         if (!fs.existsSync(filePath)) {
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] File not found: ${filePath}`);
+                logDebug(`File not found: ${filePath}`);
             }
             return null;
         }
@@ -313,11 +412,11 @@ export async function getFileStatus(filePath: string): Promise<FileStatus | null
         // 获取文件所在目录作为工作目录，使用相对路径调用soscmd status
         const fileDir = path.dirname(filePath);
         const fileName = path.basename(filePath);
-        const command = `soscmd status ${fileName}`;
+        const command = `soscmd status "${fileName}"`;
         
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] Building status command: ${command}`);
-            console.log(`[DEBUG] Working directory: ${fileDir}`);
+            logDebug(`Building status command: ${command}`);
+            logDebug(`Working directory: ${fileDir}`);
         }
         
         // 调用executeSoscmd时不显示错误信息，因为文件可能不在SOS管理下
@@ -338,7 +437,7 @@ export async function getFileStatus(filePath: string): Promise<FileStatus | null
         // 检查是否是错误信息
         if (statusLine.includes('Error:')) {
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] Error in status output: ${statusLine}`);
+                logDebug(`Error in status output: ${statusLine}`);
             }
             return null;
         }
@@ -361,24 +460,24 @@ export async function getFolderStatus(folderPath: string): Promise<Map<string, F
     try {
         // 输出调试信息（仅在调试模式下）
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] getFolderStatus called with folderPath: ${folderPath}`);
+            logDebug(`getFolderStatus called with folderPath: ${folderPath}`);
         }
         
         // 检查文件夹是否存在
         const fs = require('fs');
         if (!fs.existsSync(folderPath)) {
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] Folder not found: ${folderPath}`);
+                logDebug(`Folder not found: ${folderPath}`);
             }
             return statusMap;
         }
         
         // 使用soscmd status folderPath/*获取整个文件夹的状态
-        const command = `soscmd status ${folderPath}/*`;
+        const command = `soscmd status "${folderPath}/*"`;
         
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] Building folder status command: ${command}`);
-            console.log(`[DEBUG] Working directory: ${folderPath}`);
+            logDebug(`Building folder status command: ${command}`);
+            logDebug(`Working directory: ${folderPath}`);
         }
         
         // 调用executeSoscmd时不显示错误信息
@@ -395,7 +494,7 @@ export async function getFolderStatus(folderPath: string): Promise<Map<string, F
             // 检查是否是错误信息
             if (line.includes('Error:')) {
                 if (isDebugEnabled()) {
-                    console.log(`[DEBUG] Error in folder status output: ${line}`);
+                    logDebug(`Error in folder status output: ${line}`);
                 }
                 continue;
             }
@@ -412,12 +511,12 @@ export async function getFolderStatus(folderPath: string): Promise<Map<string, F
         }
         
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] getFolderStatus returned ${statusMap.size} statuses`);
+            logDebug(`getFolderStatus returned ${statusMap.size} statuses`);
         }
     } catch (error) {
         // 详细的错误记录（仅在调试模式下）
         if (isDebugEnabled()) {
-            console.error(`[ERROR] getFolderStatus failed: ${error instanceof Error ? error.message : String(error)}`);
+            logError(`getFolderStatus failed: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
     
@@ -429,7 +528,7 @@ export async function switchFileVersion(filePath: string, versionId: string): Pr
     try {
         // 输出调试信息（仅在调试模式下）
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] switchFileVersion called with filePath: ${filePath}, versionId: ${versionId}`);
+            logDebug(`switchFileVersion called with filePath: ${filePath}, versionId: ${versionId}`);
             vscode.window.showInformationMessage(`[DEBUG] switchFileVersion: ${filePath} -> v${versionId}`);
         }
         
@@ -438,31 +537,31 @@ export async function switchFileVersion(filePath: string, versionId: string): Pr
         const fileName = path.basename(filePath);
         
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] File directory: ${fileDir}`);
-            console.log(`[DEBUG] File name: ${fileName}`);
+            logDebug(`File directory: ${fileDir}`);
+            logDebug(`File name: ${fileName}`);
         }
         
         // 构建soscmd userev命令，切换文件版本
         const userevCommand = `soscmd userev "${filePath}/${versionId}"`;
         
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] Building userev command: ${userevCommand}`);
+            logDebug(`Building userev command: ${userevCommand}`);
         }
         
         try {
             // 尝试执行userev命令
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] Attempting userev command...`);
+                logDebug(`Attempting userev command...`);
             }
             await executeSoscmd(userevCommand, fileDir);
             vscode.window.showInformationMessage(`Successfully switched to version ${versionId}`);
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] userev command executed successfully`);
+                logDebug(`userev command executed successfully`);
             }
         } catch (error) {
             // 详细记录错误（仅在调试模式下）
             if (isDebugEnabled()) {
-                console.error(`[ERROR] userev failed: ${error instanceof Error ? error.message : String(error)}`);
+                logError(`userev failed: ${error instanceof Error ? error.message : String(error)}`);
             }
             
             // 检查是否是文件已被checkout的错误
@@ -470,7 +569,7 @@ export async function switchFileVersion(filePath: string, versionId: string): Pr
                 // 文件已被checkout，需要先执行discard命令，向用户确认
                 const confirmMessage = `File ${fileName} is checked out. Do you want to discard changes and switch to version ${versionId}?`;
                 if (isDebugEnabled()) {
-                    console.log(`[DEBUG] File is checked out, asking user for confirmation...`);
+                    logDebug(`File is checked out, asking user for confirmation...`);
                 }
                 
                 // 显示确认对话框，提供Yes/No选项
@@ -485,33 +584,33 @@ export async function switchFileVersion(filePath: string, versionId: string): Pr
                     // 用户确认执行discard操作
                     vscode.window.showWarningMessage(`Performing discard operation...`);
                     if (isDebugEnabled()) {
-                        console.log(`[DEBUG] User confirmed discard operation`);
+                        logDebug(`User confirmed discard operation`);
                     }
                     
                     // 执行discard命令，取消checkout
                     const discardCommand = `soscmd discard -F "${filePath}"`;
                     if (isDebugEnabled()) {
-                        console.log(`[DEBUG] Building discard command: ${discardCommand}`);
+                        logDebug(`Building discard command: ${discardCommand}`);
                     }
                     
                     await executeSoscmd(discardCommand, fileDir);
                     if (isDebugEnabled()) {
-                        console.log(`[DEBUG] discard command executed successfully`);
+                        logDebug(`discard command executed successfully`);
                     }
                     
                     // 重新执行userev命令
                     if (isDebugEnabled()) {
-                        console.log(`[DEBUG] Retrying userev command after discard...`);
+                        logDebug(`Retrying userev command after discard...`);
                     }
                     await executeSoscmd(userevCommand, fileDir);
                     vscode.window.showInformationMessage(`Successfully switched to version ${versionId} after discard`);
                     if (isDebugEnabled()) {
-                        console.log(`[DEBUG] userev command executed successfully after discard`);
+                        logDebug(`userev command executed successfully after discard`);
                     }
                 } else {
                     // 用户取消操作
                     if (isDebugEnabled()) {
-                        console.log(`[DEBUG] User cancelled discard and version switch`);
+                        logDebug(`User cancelled discard and version switch`);
                     }
                     vscode.window.showInformationMessage(`Version switch cancelled`);
                     return;
@@ -519,7 +618,7 @@ export async function switchFileVersion(filePath: string, versionId: string): Pr
             } else {
                 // 其他错误，重新抛出
                 if (isDebugEnabled()) {
-                    console.error(`[ERROR] userev failed with non-checkout error, rethrowing...`);
+                    logError(`userev failed with non-checkout error, rethrowing...`);
                 }
                 throw error;
             }
@@ -527,12 +626,12 @@ export async function switchFileVersion(filePath: string, versionId: string): Pr
         
         // 刷新当前编辑器
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] Refreshing editor for ${filePath}`);
+            logDebug(`Refreshing editor for ${filePath}`);
         }
         const activeEditor = vscode.window.activeTextEditor;
         if (activeEditor) {
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] Found active editor, updating content...`);
+                logDebug(`Found active editor, updating content...`);
             }
             
             const fileUri = vscode.Uri.file(filePath);
@@ -540,35 +639,45 @@ export async function switchFileVersion(filePath: string, versionId: string): Pr
             const text = Buffer.from(content).toString();
             
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] Read file content (${text.length} characters)`);
+                logDebug(`Read file content (${text.length} characters)`);
             }
             
-            await activeEditor.edit(editBuilder => {
-                const fullRange = new vscode.Range(
-                    activeEditor.document.positionAt(0),
-                    activeEditor.document.positionAt(activeEditor.document.getText().length)
-                );
-                editBuilder.replace(fullRange, text);
-            });
-            
-            if (isDebugEnabled()) {
-                console.log(`[DEBUG] Editor content updated successfully`);
+            // 只在内容实际发生变化时才执行编辑操作，避免不必要的dirty标记
+            const currentText = activeEditor.document.getText();
+            if (text !== currentText) {
+                await activeEditor.edit(editBuilder => {
+                    const fullRange = new vscode.Range(
+                        activeEditor.document.positionAt(0),
+                        activeEditor.document.positionAt(currentText.length)
+                    );
+                    editBuilder.replace(fullRange, text);
+                });
+                
+                if (isDebugEnabled()) {
+                    logDebug(`Editor content updated successfully (content changed)`);
+                }
+            } else {
+                if (isDebugEnabled()) {
+                    logDebug(`Editor content not updated (content unchanged)`);
+                }
             }
+            
+            
         } else {
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] No active editor found for ${filePath}`);
+                logDebug(`No active editor found for ${filePath}`);
             }
         }
         
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] switchFileVersion completed successfully`);
+            logDebug(`switchFileVersion completed successfully`);
         }
     } catch (error) {
         // 详细的错误记录（仅在调试模式下记录堆栈跟踪）
         const errorMsg = `Failed to switch version: ${error instanceof Error ? error.message : String(error)}`;
         if (isDebugEnabled()) {
-            console.error(`[ERROR] switchFileVersion failed: ${errorMsg}`);
-            console.error(`[ERROR] Stack trace: ${error instanceof Error ? error.stack : ''}`);
+            logError(`switchFileVersion failed: ${errorMsg}`);
+            logError(`Stack trace: ${error instanceof Error ? error.stack : ''}`);
         }
         vscode.window.showErrorMessage(errorMsg);
     }
