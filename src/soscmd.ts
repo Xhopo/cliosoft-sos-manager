@@ -412,7 +412,7 @@ export async function getFileStatus(filePath: string): Promise<FileStatus | null
         // 获取文件所在目录作为工作目录，使用相对路径调用soscmd status
         const fileDir = path.dirname(filePath);
         const fileName = path.basename(filePath);
-        const command = `soscmd status "${fileName}"`;
+        const command = `soscmd status ${fileName}`;
         
         if (isDebugEnabled()) {
             logDebug(`Building status command: ${command}`);
@@ -473,7 +473,7 @@ export async function getFolderStatus(folderPath: string): Promise<Map<string, F
         }
         
         // 使用soscmd status folderPath/*获取整个文件夹的状态
-        const command = `soscmd status "${folderPath}/*"`;
+        const command = `soscmd status ${folderPath}/*`;
         
         if (isDebugEnabled()) {
             logDebug(`Building folder status command: ${command}`);
