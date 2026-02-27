@@ -7,7 +7,7 @@ This VSCode extension integrates with ClioSoft SOS Manager, providing file statu
 ## Features
 
 - **File Status Decorations**: Displays file status icons and tooltips in VSCode Explorer:
-  - 🔓 Checked Out
+  - 🔑 Checked Out
   - 🔒 Checked In
   - ✏️ Modified
   - ⚠️ Has New Revision
@@ -120,3 +120,4 @@ MIT
 ## Support
 
 For issues or questions, please open an issue on the GitHub repository.
+
