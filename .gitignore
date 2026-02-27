@@ -1,0 +1,48 @@
+# VS Code extension ignore rules
+
+# Node.js dependencies
+node_modules/
+
+# Compiled output
+out/
+
+# Extension packages
+*.vsix
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+
+# Log files
+*.log
+
+# Test coverage
+coverage/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+build/
+dist/
+
+# IDE specific files
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Other temporary files
+out2ai.txt
