@@ -1,0 +1,590 @@
+----------------------------------------------------------------
+soscmd - provides a command line interface to sos
+----------------------------------------------------------------
+USAGE
+    soscmd <command name> [command arguments]
+
+DESCRIPTION
+    'soscmd' takes command line arguments and submits them to
+    SOS for execution.  
+
+    'soscmd' itself does very little command processing besides
+    some simple error checking. It merely submits all the 
+    command line arguments to SOS for execution.
+
+    'soscmd' and SOS need NOT have to run on the same machine.
+    'soscmd' will communicate with an existing SOS session for
+    the current workarea no matter which machine it is 
+    running on.
+
+    If SOS is not running then 'soscmd' will attempt to invoke
+    it.
+
+    'soscmd' may be invoked ONLY from the workarea directory
+    or any of its sub-directories.
+
+
+ARGUMENTS
+    command name
+        The first argument must be a command name. Command names
+        may be abbreviated provided that there is no ambiguity.
+        The commands currently supported are:
+            addreference   - add a reference object to the project
+            audit          - show the audit trail for the project
+            ci             - Check in
+            co             - Check out
+            create         - Add new file or directory to the project
+            definebranch   - Define/declare new branches
+            definetag      - Define/declare new tags or modify tags
+            delete         - Delete existing file or directory
+            deleterev      - Permanently delete selected revision
+            deleteworkarea - Delete the SOS workarea.
+            diff           - Show the difference between 2 revisions
+            dirrev         - Show/Hide the display of directory revisions
+            discardco      - Discard check out
+            displaytmp     - Show/Hide the display of unmanaged objects
+            editreference  - Sets the RSO for this sub-tree to be different from that of the Project RSO
+            exitsos        - Exit the SOS session running in this workarea
+            exportrev      - Get selected revision under a different name
+            expand         - Expands or collapses directories in SOS
+            findwaroot     - Print the workarea root path
+            gui            - switch to GUI mode
+            help           - Print help
+            history        - Show history
+            merge          - Merge a revision of a file into the checked out revision
+            modattr        - Modify existing attribute value or add a new attribute
+            move           - Move objects to another directory
+            neverpopulate  - Mark the specified directory to never be populated in this workarea
+            newworkarea    - Create a new workarea
+            nobjstatus     - Show status and attributes of specified objects
+            nogui          - switch to non-GUI mode
+            objstatus      - Show status and attributes of specified object
+            pack           - Manage sos package object
+            populate       - Populate the specified directory
+            preference     - Set and get user preference settings
+            print          - Print message in SOS window
+            query          - Get project-specific information from sos
+            rename         - Rename an existing file or directory
+            retirebranch   - retire/activate an existing branch
+            retiresnapshot - retire/activate an existing snapshot
+            retiretag      - retire/activate an existing tag
+            revertrev      - Revert latest rev back to a previous rev
+            select         - Select objects
+            shell          - Execute a shell command
+            showdiffs      - Show differences between 2 RSO's
+            showlabels     - Show all the revisions in the repository that match the specified labels
+            snapshot       - Take a snapshot
+            status         - Show status and version information in workarea
+            tag            - Tag revision with the given name
+            termbranch     - Terminate/Activate a branch on a file or directory
+            undelete       - Undelete objects from a specified directory
+            unpopulate     - Unpopulate the specified directory
+            unselect       - Unselect from current selections
+            update         - Update the workarea
+            updatesel      - Update selected objects in the workarea
+            usebranch      - Set a branch as project RSO
+            userev         - Get selected revision in to the workarea
+
+        For more information on any command type:
+            help <command name>
+
+        To determine the version of SOS type:
+            version 
+
+    command arguments
+        Most of the commands are of the form:
+           command [options] [pathnames]
+        The 'options' and 'pathnames' may appear in any order.
+
+NOTES
+    You may use shell wildcards like '*' to specify pathnames
+    but you should remember that the shell and not 'soscmd'
+    does the wildcard substitution.
+
+    It would be convenient to setup aliases for some of the
+    common commands in your '.cshrc' file. For example:
+      alias sosco 'soscmd co'
+      alias sosci 'soscmd ci'
+
+EXAMPLES
+    soscmd update
+        Update the workarea using the current revision search
+        order.
+
+    soscmd co *.v ../top.v
+        This command checks out all the files with the extension
+        '.v' in the current directory and also the file 'top.v'
+        in the parent dir.
+
+    soscmd co alu.v/main
+        Check out the latest revision of 'alu.v' on the 'main'
+        line of development.
+
+    soscmd diff alu.v/12 alu.v/gold
+        Show the difference between revision '12' of alu.v and
+        the revision tagged 'gold'.
+
+    soscmd discardco -F /stim.dat
+        Discard the check out of file 'stim.dat' in the root
+        directory of the workarea even if it has been modified.
+
+    soscmd ci -sco -achange_su="Fixed race condition."
+        Check in ALL the checked out files with a 
+        'change_summary' of:
+            Fixed race condition.
+----------------------------------------------------------------
+
+[@login10]>soscmd help ci
+----------------------------------------------------------------
+soscmd ci - check in files and directories
+----------------------------------------------------------------
+USAGE
+    soscmd ci [-D]
+              [-F]
+              [-a<attrname>=<attrvalue>]
+              [-ma mm -mo]
+              [-Nco -kco]
+              [-T<tagName>]
+              [-rev<rev num>]
+              [select options]
+              [-q] 
+              [pathnames]
+
+DESCRIPTION
+    Checks in previously checked out files and directories.
+    When an object is checked in a new revision of the object
+    is created. The check out lock placed on the file or 
+    directory is removed allowing others to check it out.
+    The permissions of the file in your workarea is changed to 
+    read only.
+
+    If a file or directory has NOT been modified then it is
+    not checked in and a warning is issued unless the '-F' 
+    or '-D' options are provided.
+
+    If no value is provided for the 'Log' attribute then you
+    WILL be prompted to enter a log of your changes.
+
+ARGUMENTS
+    -D
+        Discard the check out of any file or directory to which
+        NO changes have been made. Without this option unchanged 
+        files will not be discarded.
+
+    -F
+        Check in the file or directory even if NO changes have 
+        been made. Without this option unchanged files will not
+        be checked in.
+
+    -a<attrname>=<attrvalue>
+        This option is used to specify values to attributes
+        with this command.
+        The attribute name and value are separated by the '='
+        character with no spaces in between.
+        The attribute name and value must immediately
+        follow this option with no spaces.
+        If the attribute value has spaces then you must enclose
+        the value in double quotes '"'.
+
+        Attribute names may be abbreviated provided there is no
+        ambiguity.
+
+    -ma  -mm  -mo
+        These are mutually exclusive options. They specify what
+        sort of merge to do when you are trying to checkin a
+        file and new revisions of this file have been introduced
+        since you checked it out. This situation can only arise
+        if the concurrent checkout capability is being used.
+          -ma --> Do an automatic merge with the latest revision
+                  Checkin will be aborted if conflicting changes
+                  are detected.
+          -mm --> You have already done a manual merge with the
+                  latest revision and would just like to record
+                  that a merge was done.
+          -mo --> You are not interested in merging and would
+                  like to check in your file as is. If you use
+                  this option you are probably over riding 
+                  changes made by someone else.
+        
+    -Nco
+        This will allow a file or directory to be checked in
+        even if it is not checked out.
+
+    -kco
+        This will leave the file or directory checked out after the
+        check in.
+
+    -T<tagNames>
+        Attach the tags to the new revision created on checkin.
+
+    -rev<rev num>
+        Specify an integer revision number to be assigned to the
+        checked in revision. Note that the revision number must
+        be an integer greater than the latest revision on the
+        branch the file is checked out on.
+    -q
+        Quiet or non-verbose  mode. Do not print per object checkin   status message. Only
+        command summary is printed along with the checked in  object count. 
+
+    [select options] pathnames
+        These are selection options.
+        Refer to help for the 'select' command.
+
+        The selections in the SOS window will change to the
+        selection specified by these options.
+
+        If no selection option or pathnames are provided then
+        the command will be performed on the current selections
+        in the SOS window.
+
+NOTES
+    If multiple files are to be checked in by the same command
+    then you will NOT be prompted to enter a separate log message
+    for each file. The same log message and other attribute values
+    will be used for all the files checked in.
+
+    The '-D' and '-F' options are mutually exclusive. You may use
+    one or the other but not both.
+
+    If the 'change_summary' attribute in not specified but the 
+    'Log' attribute is provided then the FIRST LINE of the 'Log'
+    will be used as the 'change_summary'.
+
+EXAMPLES
+    soscmd ci
+        Check in all files and directories which are currently
+        selected in the SOS window.
+
+    soscmd ci .synopsys
+        Check in the file '.synopsys'.
+
+    soscmd ci alu/mult/booth.vhd
+        Check in the file 'booth.vhd' in the directory 'mult'
+        contained in the directory 'alu'.
+
+    soscmd ci *.vhd
+        Check in all the files with the '.vhd' extension in the
+        current working directory.
+
+    soscmd ci -F *.vhd
+        Check in all the files with the '.vhd' extension in the
+        current working directory even if no changes have been
+        made.
+
+    soscmd ci -D -sco
+        Check in all the files checked out in this workarea.
+        If a file has not been changed then do not check it
+        in but instead cancel the check out.
+
+    soscmd ci .
+        Check in the current directory.
+
+    soscmd ci -achange_summary="Instantiated adder." top.vhd
+        Check in 'top.vhd' and assign the 'change_summary'
+        attribute the value:
+            Instantiated adder.
+
+    soscmd ci -sco -aLog="Got rid of synthesis warnings."
+        Check in all files which are currently checked out in
+        this work area and assign the 'Log' attribute the value:
+            Got rid of synthesis warnings.
+
+    soscmd ci -achange_summary="Instantiated adder." -rev101 top.vhd
+        Check in 'top.vhd' and assign the 'change_summary'
+        attribute the value:
+            Instantiated adder.
+        Make the number of the new revision to be 101 without
+        regard to what the current revision is.
+
+    soscmd ci -sco -achange_summary="No warnings!" \
+              -aLog="Got rid of synthesis warnings."
+        Check in all files which are currently checked out in
+        this work area and assign the 'Log' attribute the value:
+            Got rid of synthesis warnings.
+        and the 'change_summary' attribute the value:
+            No warnings!
+
+    soscmd ci -Nco -sw -F -T"gold silver" -achange_summary="Test" -aLog="Test"
+        Check in all files that are writable even if they are not
+        checked out (-sw will only select writable files).
+        Force if there is no change.
+        Attach the tags 'gold' and 'silver' to the new revision
+        after checkin.
+        Do not print any information messages.
+----------------------------------------------------------------
+
+[@login10]>soscmd help co
+----------------------------------------------------------------
+soscmd co - check out files and directories
+----------------------------------------------------------------
+USAGE
+    soscmd co [-C]
+              [-a<attrname>=<attrvalue>]
+              [-b<branchname>]
+              [-Nlock]
+              [-Novr]
+              [-q]
+              [select options]
+              [pathnames]
+
+DESCRIPTION
+    Checks out for editing the selected files and directories.
+    Only the latest revision on any branch may be checked out.
+
+    A check out lock is placed on the revision which keeps 
+    others from checking out the same revision of the file. 
+    When a file is checked out, write permissions are given
+    to the file in your workarea and you can now edit it.
+
+ARGUMENTS
+    -C
+        Enable concurrent checkout.
+        If you have this option then you will be able to checkout
+        a file even if someone else already has the same revision
+        checked out.
+
+    -a<attrname>=<attrvalue>
+        This option is used to specify values to attributes
+        with this command.
+        The attribute name and value are separated by the '='
+        character with no spaces in between.
+        The attribute name and value must immediately
+        follow this option with no spaces.
+        If the attribute value has spaces then you must enclose
+        the value in double quotes '"'.
+
+        Attribute names may be abbreviated provided there is no
+        ambiguity.
+
+    -b<branchname>
+        If this option is used then the latest revision on the
+        given branch is checked out. If the branch does not
+        exist on the file then a branch is created. 
+
+    -Nlock
+        Checkout without placing a lock on the file.
+        You should use this option carefully because other
+        users can edit the file since you have not locked it.
+        It can be used when the client is unable to connect to
+        the primary server due to network or other issues.
+        It may also be used when you want to make some temporary
+        modifications to the file that you plan to discard later.
+
+    -Novr
+        Do not overwrite modified file in the workarea.
+        You should use this option if the file in the workarea
+        has been modified without checking it out. SOS will not
+        restore the original file from the server.
+    -q
+        Quiet or non-verbose  mode. Do not print per object checked out  status message. Only
+        command summary is printed along with the checked out  object count. 
+
+    [select options] pathnames
+        These are selection options.
+        Refer to help for the 'select' command.
+
+        The selections in the SOS window will change to the
+        selection specified by these options.
+
+        If no selection option or pathnames are provided then
+        the command will be performed on the current selections
+        in the SOS window.
+
+NOTES
+    If the 'change_summary' attribute in not specified but the 
+    'Log' attribute is provided  then the same value is also 
+    used for the 'change_summary'.
+
+    If a file to be checked out already has write permissions in
+    your workarea then that file is renamed by adding a '.SVM'
+    extension before checking out the file from the project.
+    A warning message is also issued to alert you.
+
+EXAMPLES
+    soscmd co
+        Check out all files and directories which are currently
+        selected in the SOS window.
+
+    soscmd co *.vhd
+        Check out all the files with the '.vhd' extension in the
+        current working directory.
+
+    soscmd co adder.vhd/main
+        Check out the latest revision of 'adder.vhd' on the main
+        development branch.
+
+    soscmd co -C adder.vhd/main
+        Check out the latest revision of 'adder.vhd' on the main
+        development branch even if someone else also has it
+        checked out.
+
+    soscmd co .
+        Check out the current directory.
+
+    soscmd co -achange_summary="Instantiate adder." top.vhd
+        Check out 'top.vhd' and assign the 'change_summary'
+        attribute the value:
+            Instantiate adder.
+
+    soscmd co -snm -aLog="Merge the 'rel1_fix' branch to main."
+        Check out all files which have unmerged branches and
+        assign the 'Log' attribute the value:
+          Merge the 'rel1_fix' branch to main.
+
+    soscmd co -snm -achange_summary="Merge rel1_fix" \
+              -aLog="Merge the 'rel1_fix' branch to main."
+        Check out all files which have unmerged branches and
+        assign the 'Log' attribute the value:
+            Merge the 'rel1_fix' branch to main.
+        and the 'change_summary' attribute the value:
+            Merge rel1_fix
+
+    soscmd co -bmain testbench.v
+        Checkout the latest revision of 'testbench.v' on the 
+        main line of development.
+
+    soscmd co -bbugfix top.v/5
+      Checkout revision '5' of 'top.v' on a branch 'bugfix'.
+      If the branch does not exist then create it.
+----------------------------------------------------------------
+
+[@login10]>soscmd help history
+----------------------------------------------------------------
+soscmd history - show the history of changes
+----------------------------------------------------------------
+USAGE
+    soscmd history 
+      [-from<time>]
+      [-to<time>]
+      [-cmd<command name>]
+      [-user<user name>]
+      [-out<output file name>]
+      [-fs]
+      [select options] 
+      [pathnames]
+
+DESCRIPTION
+    This command displays the history of changes made to the
+    selected files. All previous check in and tag operations
+    and any current check outs will be listed.
+
+    The history of changes is listed in reverse chronological 
+    order.
+
+ARGUMENTS
+    -from<date+time>
+        The local date and time from which the history should be
+        displayed. The date and time is specified in local time
+        and converted appropriately on the server.
+        The format for specifying date+time is:
+            "YYYY/MM/DD HH:MM:SS"
+        You must start with the year but you can choose to
+        specify as little as you want. The parts not specified
+        will be assumed to be 0.
+
+        You can also specify the number of days before the 
+        current date by indicating a negative integer: "-N".
+
+        If this option is not specified then it will default
+        to start of the project.        
+
+    -to<date+time>
+        The local date and time up to which the history should be
+        displayed. The date and time is specified in local time
+        and converted appropriately on the server.
+        The format for specifying date+time is:
+            "YYYY/MM/DD HH:MM:SS"
+        You must start with the year but you can choose to
+        specify as little as you want. The parts not specified
+        will be assumed to be 0.
+
+        If this option is not specified then it will default
+        to the current time.
+
+    -cmd<command name>
+        This option is a filter to specify which command will 
+        be listed in the history output. The option can be used
+        multiple times to specify multiple commands. The following 
+        are valid command names for history command option:
+          create, co, ci, tag, termbranch
+
+        If this option is not specified then all commands are
+        listed.
+
+    -user<user name>
+        This option will show history records for a user.
+        The option can be used multiple times to specify multiple users.
+
+        If this option is not specified then all user records are
+        listed.
+
+        NOTE: if -user and -cmd is specified then the filter will 
+              AND both the results.
+
+    -out<filename>
+        The filename to dump the history to instead of stdout.
+        If a relative pathname is provided then it is assumed
+        to be relative to the root of the workarea and
+        NOT the current working directory.
+
+    -fs
+       Format each command in a single line instead of the 
+       default multi-line format. This is useful if the file is
+       to be parsed in scripts.
+
+    [select options] pathnames
+        These are selection options.
+        Refer to help for the 'select' command.
+
+        The selections in the SOS window will change to the
+        selection specified by these options.
+
+        If no pathnames are provided then the command will be 
+        performed on the current selections in the SOS window.
+
+EXAMPLES
+    soscmd history
+        Print the history of the files and directories selected
+        in the SOS window.
+
+    soscmd hist testbench.v stim.dat
+        Print history of the files 'testbench.v' and 'stim.dat'.
+
+    soscmd hist -outstim.hist stim.dat
+        Print history of the file 'stim.dat' to 'stim.hist'.
+
+    soscmd hist -cmdco -cmdci stim.dat
+        Print history of the file 'stim.dat' and show all
+        history records for 'co' or 'ci'.
+
+    soscmd hist -cmdci -usersos_user stim.dat
+        Print history of the file 'stim.dat' and show only
+        history records for cmd 'ci' and user 'sos_user'.
+
+    soscmd hist -from"2010/01/01" -to"2010/04/01" stim.dat
+        Print all the history records in Q1 2010.
+----------------------------------------------------------------
+
+example print 1:
+[@login10]>soscmd history -fs ./regression.csh 
+** History of file(s) './design_data/testbench/digital_top/regression.csh'  written out.
+================================================================================
+From:          1970/01/01 08:00:00
+To:            2026/01/15 11:24:41
+Show commands: All
+Show users:    All
+================================================================================
+================================================================================
+Generated at:  2026/01/15 11:09:41
+History of:    ./design_data/testbench/digital_top/regression.csh
+Repo Path:     /sosdata/REPO/RDSMICN90BCD.rep/HOUS01
+Project Name:  HOUS01
+Project RSO:   main
+Item ID:       5097
+Type:          File
+Revision:      1
+State:         Checkedin
+________________________________________
+Description:   
+================================================================================
+Action: checkin | Revision: 1 | Rev ID: 5940 | By: haiming.yin | At time: 2026/01/12 15:46:39 | Checksum: 3850098212 | Size: 891 | Log: Initial revision.

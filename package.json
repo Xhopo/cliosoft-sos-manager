@@ -1,0 +1,236 @@
+{
+  "name": "cliosoft-sos-manager",
+  "displayName": "ClioSoft SOS Manager",
+  "description": "VSCode extension for ClioSoft SOS Manager, allowing users to view and switch file versions",
+  "version": "0.1.0",
+  "publisher": "xhopo",
+  "author": "xhopo with trae",
+  "icon": "resources/cliosoft-icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/cliosoft-sos-manager"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:cliosoft-sos-manager.checkout",
+    "onCommand:cliosoft-sos-manager.checkin",
+    "onCommand:cliosoft-sos-manager.diff",
+    "onCommand:cliosoft-sos-manager.discard",
+    "onCommand:cliosoft-sos-manager.officeOpen",
+    "onCommand:cliosoft-sos-manager.compileRtl",
+    "onCommand:cliosoft-sos-manager.rebuildCtags",
+    "onView:cliosoft-sos-manager.fileVersions"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cliosoft-sos-manager.checkout",
+        "title": "Check out the current file without lock",
+        "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.checkin",
+        "title": "Check in the current file",
+        "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.diff",
+        "title": "Diff the current file with last version",
+        "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.discard",
+        "title": "Discard the current file without lock",
+        "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.officeOpen",
+        "title": "Office open the current file",
+        "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.compileRtl",
+        "title": "Compile RTL",
+        "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.rebuildCtags",
+        "title": "Rebuild ctags",
+        "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.toggleRefresh",
+        "title": "Toggle status refresh",
+        "category": "ClioSoft SOS"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "cliosoft-sos-manager.checkout",
+          "group": "cliosoft-sos@1",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "cliosoft-sos-manager.checkout",
+          "group": "cliosoft-sos@1",
+          "when": "multipleResources"
+        },
+        {
+          "command": "cliosoft-sos-manager.checkin",
+          "group": "cliosoft-sos@2",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "cliosoft-sos-manager.checkin",
+          "group": "cliosoft-sos@2",
+          "when": "multipleResources"
+        },
+        {
+          "command": "cliosoft-sos-manager.diff",
+          "group": "cliosoft-sos@3",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "cliosoft-sos-manager.discard",
+          "group": "cliosoft-sos@4",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "cliosoft-sos-manager.discard",
+          "group": "cliosoft-sos@4",
+          "when": "multipleResources"
+        },
+        {
+          "command": "cliosoft-sos-manager.officeOpen",
+          "group": "cliosoft-sos@5",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "cliosoft-sos-manager.compileRtl",
+          "group": "cliosoft-sos@6"
+        },
+        {
+          "command": "cliosoft-sos-manager.rebuildCtags",
+          "group": "cliosoft-sos@7"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cliosoft-sos-manager",
+          "title": "ClioSoft SOS",
+          "icon": "resources/cliosoft-icon.png"
+        }
+      ]
+    },
+    "views": {
+      "cliosoft-sos-manager": [
+        {
+          "id": "cliosoft-sos-manager.fileVersions",
+          "name": "File Versions"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ClioSoft SOS Manager",
+      "properties": {
+        "cliosoft-sos-manager.enableDebugInfo": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable debug information output in console and status bar"
+        },
+        "cliosoft-sos-manager.commands.checkout.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable checkout command in context menu"
+        },
+        "cliosoft-sos-manager.commands.checkout.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom checkout command"
+        },
+        "cliosoft-sos-manager.commands.checkin.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable checkin command in context menu"
+        },
+        "cliosoft-sos-manager.commands.checkin.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom checkin command"
+        },
+        "cliosoft-sos-manager.commands.diff.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable diff command in context menu"
+        },
+        "cliosoft-sos-manager.commands.diff.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom diff command"
+        },
+        "cliosoft-sos-manager.commands.discard.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable discard command in context menu"
+        },
+        "cliosoft-sos-manager.commands.discard.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom discard command"
+        },
+        "cliosoft-sos-manager.commands.officeOpen.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable officeOpen command in context menu"
+        },
+        "cliosoft-sos-manager.commands.officeOpen.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom officeOpen command"
+        },
+        "cliosoft-sos-manager.commands.compileRtl.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable compileRtl command in context menu"
+        },
+        "cliosoft-sos-manager.commands.compileRtl.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom compileRtl command"
+        },
+        "cliosoft-sos-manager.commands.rebuildCtags.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable rebuildCtags command in context menu"
+        },
+        "cliosoft-sos-manager.commands.rebuildCtags.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom rebuildCtags command"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^18.11.18",
+    "typescript": "^5.3.3",
+    "vscode-test": "^0.4.3"
+  }
+}
