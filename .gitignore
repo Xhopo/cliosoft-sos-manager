@@ -46,3 +46,7 @@ dist/
 
 # Other temporary files
 out2ai.txt
+
+# Additional build/output directories
+extension/
+vsix/

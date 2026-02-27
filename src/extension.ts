@@ -1,86 +1,71 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { FileStatus, getFolderStatus, getFileVersions, switchFileVersion, executeSoscmd, FileVersion, getFileStatus } from './soscmd';
-import { isDebugEnabled, logDebug, logError } from './utils';
-
-// 获取配置
-function getConfig() {
-    return vscode.workspace.getConfiguration('cliosoft-sos-manager');
-}
-
-// 检查命令是否启用
-function isCommandEnabled(commandName: string): boolean {
-    const config = getConfig();
-    return config.get(`commands.${commandName}.enable`, true);
-}
-
-// 获取命令配置
-function getCommandConfig(commandName: string): string {
-    const config = getConfig();
-    return config.get(`commands.${commandName}.command`, '');
-}
-
-// 替换命令中的变量
-function replaceCommandVariables(command: string, variables: Record<string, string>): string {
-    let result = command;
-    for (const [key, value] of Object.entries(variables)) {
-        result = result.replace(new RegExp(`\\$\{${key}\}`, 'g'), value);
-    }
-    return result;
-}
+import { isDebugEnabled, logDebug, logError, isCommandEnabled, getCommandConfig, replaceCommandVariables, BATCH_SIZE } from './utils';
 
 // 刷新文件状态，确保VSCode与SOS状态一致
 async function refreshFileStatus(filePaths: string[]): Promise<void> {
+    // 收集所有不重复的文件夹路径
+    const folders = new Set(filePaths.map(p => path.dirname(p)));
+    folders.forEach(f => fileStatusDecorator.clearFolderCache(f));
+
     for (const filePath of filePaths) {
         const fileUri = vscode.Uri.file(filePath);
         try {
             await vscode.workspace.fs.stat(fileUri);
-            
             if (fileStatusDecorator) {
-                await fileStatusDecorator.updateFileAndAncestors(filePath);
+                fileStatusDecorator.updateFileAndAncestors(filePath);
             }
-            
-            console.log(`[DEBUG] Completed file status refresh for ${filePath}`);
+            logDebug(`Completed file status refresh for ${filePath}`);
         } catch (error) {
-            console.error(`[ERROR] Failed to refresh file status for ${filePath}:`, error);
+            logError(`Failed to refresh file status for ${filePath}:`, error);
         }
     }
-    
     await vscode.commands.executeCommand('workbench.files.action.refreshFilesExplorer');
 }
-
-const BATCH_SIZE = 50;
 
 async function executeBatchCommand(
     filePaths: string[],
     fileDir: string,
     buildCommand: (batch: string[]) => string,
     commandName: string
-): Promise<void> {
+): Promise<{ successCount: number; failCount: number; errors: any[] }> {
+    const results = { successCount: 0, failCount: 0, errors: [] as any[] };
+
     if (filePaths.length <= BATCH_SIZE) {
         const command = buildCommand(filePaths);
-        console.log(`[DEBUG] ${commandName} command:`, command);
-        await executeSoscmd(command, fileDir);
+        logDebug(`${commandName} command:`, command);
+        try {
+            await executeSoscmd(command, fileDir);
+            results.successCount = filePaths.length;
+        } catch (error) {
+            results.failCount = filePaths.length;
+            results.errors.push(error);
+            vscode.window.showErrorMessage(`${commandName} failed: ${error}`);
+        }
     } else {
         const totalBatches = Math.ceil(filePaths.length / BATCH_SIZE);
-        console.log(`[DEBUG] ${commandName}: Processing ${filePaths.length} files in ${totalBatches} batches`);
+        logDebug(`${commandName}: Processing ${filePaths.length} files in ${totalBatches} batches`);
         
         for (let i = 0; i < filePaths.length; i += BATCH_SIZE) {
             const batch = filePaths.slice(i, i + BATCH_SIZE);
             const batchNum = Math.floor(i / BATCH_SIZE) + 1;
             const command = buildCommand(batch);
             
-            console.log(`[DEBUG] ${commandName} batch ${batchNum}/${totalBatches}:`, command);
+            logDebug(`${commandName} batch ${batchNum}/${totalBatches}:`, command);
             
             try {
                 await executeSoscmd(command, fileDir);
+                results.successCount += batch.length;
                 vscode.window.showInformationMessage(`${commandName} batch ${batchNum}/${totalBatches} completed`);
             } catch (error) {
+                results.failCount += batch.length;
+                results.errors.push(error);
                 vscode.window.showErrorMessage(`${commandName} batch ${batchNum}/${totalBatches} failed: ${error}`);
-                throw error;
             }
         }
     }
+    return results;
 }
 
 // 定义文件版本树节点
@@ -108,7 +93,7 @@ class FileVersionItem extends vscode.TreeItem {
             this.iconPath = 'info';
         } else {
             this.tooltip = `Version ${version.id} - ${version.ciBy} - ${version.ciTime}\n${version.changeSummary}`;
-            this.description = `${version.changeSummary}`
+            this.description = `${version.changeSummary}`;
             this.contextValue = 'fileVersion';
             
             if (isCurrent) {
@@ -144,8 +129,8 @@ class FileVersionsTreeDataProvider implements vscode.TreeDataProvider<FileVersio
         this.currentFileStatus = await getFileStatus(filePath);
         
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] File set to: ${filePath}`);
-            console.log(`[DEBUG] File status: ${JSON.stringify(this.currentFileStatus)}`);
+            logDebug(`File set to: ${filePath}`);
+            logDebug(`File status: ${JSON.stringify(this.currentFileStatus)}`);
         }
         
         this.refresh();
@@ -157,35 +142,35 @@ class FileVersionsTreeDataProvider implements vscode.TreeDataProvider<FileVersio
 
     async getChildren(element?: FileVersionItem): Promise<FileVersionItem[]> {
         if (isDebugEnabled()) {
-            console.log(`[DEBUG] getChildren called with element: ${element?.label}`);
+            logDebug(`getChildren called with element: ${element?.label}`);
         }
         
         if (!element) {
             if (!this.currentFilePath) {
                 if (isDebugEnabled()) {
-                    console.log('[DEBUG] No file selected, returning noVersions item');
+                    logDebug('No file selected, returning noVersions item');
                 }
                 return [new FileVersionItem(null, null, false)];
             }
 
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] Active file: ${this.currentFilePath}`);
+                logDebug(`Active file: ${this.currentFilePath}`);
             }
             
             const versions = await getFileVersions(this.currentFilePath);
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] getFileVersions returned ${versions.length} versions`);
+                logDebug(`getFileVersions returned ${versions.length} versions`);
             }
 
             if (versions.length === 0) {
                 if (isDebugEnabled()) {
-                    console.log(`[DEBUG] No versions found, returning noVersions item`);
+                    logDebug(`No versions found, returning noVersions item`);
                 }
                 return [new FileVersionItem(null, this.currentFilePath, false)];
             }
 
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] Creating FileVersionItems for ${versions.length} versions`);
+                logDebug(`Creating FileVersionItems for ${versions.length} versions`);
             }
             
             const currentRevision = this.currentFileStatus?.revision || '';
@@ -249,6 +234,18 @@ export function activate(context: vscode.ExtensionContext) {
                 if (isDebugEnabled()) {
                     logDebug(`Refreshing tree after version switch`);
                 }
+
+                // ... 参数校验和切换逻辑
+                await switchFileVersion(filePath, version.id);
+                
+                // 清除该文件所在文件夹的缓存
+                const folder = path.dirname(filePath);
+                fileStatusDecorator.clearFolderCache(folder);
+                
+                // 更新文件及其祖先
+                await treeDataProvider.setFile(filePath);
+                fileStatusDecorator.updateFileAndAncestors(filePath);
+
             } else {
                 logError(`Invalid parameters for switchVersion: filePath=${filePath}, version=${version}`);
             }
@@ -287,7 +284,7 @@ export function activate(context: vscode.ExtensionContext) {
             logDebug('Working directory:', fileDir);
             logDebug('File names:', fileNames);
             
-            await executeBatchCommand(
+            const results = await executeBatchCommand(
                 filePaths,
                 fileDir,
                 (batch) => {
@@ -301,8 +298,13 @@ export function activate(context: vscode.ExtensionContext) {
                 'Checkout'
             );
             
-            vscode.window.showInformationMessage('Checked out: ' + fileNames);
-            console.log('[DEBUG] Checkout command completed successfully');
+            if (results.failCount === 0) {
+                vscode.window.showInformationMessage(`Checked out: ${fileNames}`);
+                logDebug('Checkout command completed successfully');
+            } else {
+                vscode.window.showWarningMessage(`Checked out ${results.successCount} files, ${results.failCount} failed.`);
+                logDebug(`Checkout command completed with ${results.successCount} successes and ${results.failCount} failures`);
+            }
             
             await refreshFileStatus(filePaths);
         })
@@ -349,7 +351,7 @@ export function activate(context: vscode.ExtensionContext) {
             logDebug('Working directory:', fileDir);
             logDebug('File names:', fileNames);
             
-            await executeBatchCommand(
+            const results = await executeBatchCommand(
                 filePaths,
                 fileDir,
                 (batch) => {
@@ -363,8 +365,13 @@ export function activate(context: vscode.ExtensionContext) {
                 'Checkin'
             );
             
-            vscode.window.showInformationMessage('Checked in: ' + fileNames);
-            console.log('[DEBUG] Checkin command completed successfully');
+            if (results.failCount === 0) {
+                vscode.window.showInformationMessage(`Checked in: ${fileNames}`);
+                logDebug('Checkin command completed successfully');
+            } else {
+                vscode.window.showWarningMessage(`Checked in ${results.successCount} files, ${results.failCount} failed.`);
+                logDebug(`Checkin command completed with ${results.successCount} successes and ${results.failCount} failures`);
+            }
             
             await refreshFileStatus(filePaths);
         })
@@ -444,7 +451,7 @@ export function activate(context: vscode.ExtensionContext) {
             logDebug('Working directory:', fileDir);
             logDebug('File names:', fileNames);
             
-            await executeBatchCommand(
+            const results = await executeBatchCommand(
                 filePaths,
                 fileDir,
                 (batch) => {
@@ -458,8 +465,13 @@ export function activate(context: vscode.ExtensionContext) {
                 'Discard'
             );
             
-            vscode.window.showInformationMessage('Discarded: ' + fileNames);
-            console.log('[DEBUG] Discard command completed successfully');
+            if (results.failCount === 0) {
+                vscode.window.showInformationMessage(`Discarded: ${fileNames}`);
+                logDebug('Discard command completed successfully');
+            } else {
+                vscode.window.showWarningMessage(`Discarded ${results.successCount} files, ${results.failCount} failed.`);
+                logDebug(`Discard command completed with ${results.successCount} successes and ${results.failCount} failures`);
+            }
             
             await refreshFileStatus(filePaths);
         })
@@ -538,7 +550,17 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     fileStatusDecorator = new FileStatusDecorator();
-    
+    // 新增：初始化刷新
+    vscode.workspace.textDocuments.forEach(doc => {
+        const filePath = doc.uri.fsPath;
+        if (filePath) {
+            fileStatusDecorator.updateFileAndAncestors(filePath);
+        }
+    });
+    if (vscode.window.activeTextEditor) {
+        treeDataProvider.setFile(vscode.window.activeTextEditor.document.uri.fsPath);
+    }
+
     // 监听文本编辑器变化（文本文件）
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor((editor) => {
@@ -550,11 +572,11 @@ export function activate(context: vscode.ExtensionContext) {
     );
     
     // 监听文件保存事件
-    context.subscriptions.push(
-        vscode.workspace.onDidSaveTextDocument((document) => {
-            fileStatusDecorator.updateFileAndAncestors(document.uri.fsPath);
-        })
-    );
+    // context.subscriptions.push(
+    //     vscode.workspace.onDidSaveTextDocument((document) => {
+    //         fileStatusDecorator.updateFileAndAncestors(document.uri.fsPath);
+    //     })
+    // );
     
     // 监听文件打开事件
     context.subscriptions.push(
@@ -690,6 +712,40 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
     
+    // 添加文件变化监听器，实时更新文件状态
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeTextDocument(async (event) => {
+            const filePath = event.document.uri.fsPath;
+            if (isDebugEnabled()) {
+                logDebug(`File changed: ${filePath}`);
+            }
+            // 清除该文件所在文件夹的缓存
+            if (fileStatusDecorator) {
+                const folderPath = path.dirname(filePath);
+                fileStatusDecorator.clearFolderCache(folderPath);
+                // 更新文件状态
+                fileStatusDecorator.updateFileAndAncestors(filePath);
+            }
+        })
+    );
+    
+    // 添加文件保存监听器
+    context.subscriptions.push(
+        vscode.workspace.onDidSaveTextDocument(async (document) => {
+            const filePath = document.uri.fsPath;
+            if (isDebugEnabled()) {
+                logDebug(`File saved: ${filePath}`);
+            }
+            // 清除该文件所在文件夹的缓存
+            if (fileStatusDecorator) {
+                const folderPath = path.dirname(filePath);
+                fileStatusDecorator.clearFolderCache(folderPath);
+                // 更新文件状态
+                fileStatusDecorator.updateFileAndAncestors(filePath);
+            }
+        })
+    );
+    
     context.subscriptions.push({
         dispose: () => {
             clearInterval(statusRefreshInterval);
@@ -712,6 +768,7 @@ export function deactivate() {
 
 class FileStatusDecorator {
     private statusCache: Map<string, FileStatus> = new Map();
+    private folderStatusCache: Map<string, { statusMap: Map<string, FileStatus>, timestamp: number }> = new Map();
     private updatingFolders: Set<string> = new Set();
     private periodicUpdateTimer: NodeJS.Timeout | undefined;
     private readonly maxConcurrentUpdates = 5;
@@ -720,6 +777,9 @@ class FileStatusDecorator {
     private fileDecorationProviderRegistration: vscode.Disposable | undefined;
     private isPaused: boolean = false;
     private statusBarItem: vscode.StatusBarItem;
+    private readonly cacheExpiryTime = 30000; // 30秒缓存过期时间
+    private readonly debounceTimeout = 500; // 500毫秒防抖
+    private debounceTimer: NodeJS.Timeout | undefined;
     
     constructor() {
         this.statusBarItem = vscode.window.createStatusBarItem('cliosoft-sos-manager.refreshToggle', vscode.StatusBarAlignment.Right, 100);
@@ -790,11 +850,22 @@ class FileStatusDecorator {
         }
     }
     
-    async updateFileAndAncestors(filePath: string): Promise<void> {
+    updateFileAndAncestors(filePath: string): void {
         if (this.isPaused) {
             return;
         }
         
+        // 防抖处理，避免频繁更新
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+        }
+        
+        this.debounceTimer = setTimeout(async () => {
+            await this.doUpdateFileAndAncestors(filePath);
+        }, this.debounceTimeout);
+    }
+    
+    private async doUpdateFileAndAncestors(filePath: string): Promise<void> {
         try {
             const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath));
             if (!workspaceFolder) {
@@ -822,7 +893,7 @@ class FileStatusDecorator {
             foldersToUpdate.push(workspaceRoot);
             
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] Updating ${foldersToUpdate.length} ancestor folders: ${foldersToUpdate.join(', ')}`);
+                logDebug(`Updating ${foldersToUpdate.length} ancestor folders: ${foldersToUpdate.join(', ')}`);
             }
             
             const chunkSize = Math.min(this.maxConcurrentUpdates, foldersToUpdate.length);
@@ -839,13 +910,51 @@ class FileStatusDecorator {
             }
         } catch (error) {
             if (isDebugEnabled()) {
-                console.error(`[ERROR] Failed to update file and ancestors: ${error instanceof Error ? error.message : String(error)}`);
+                logError(`Failed to update file and ancestors: ${error instanceof Error ? error.message : String(error)}`);
             }
         }
     }
     
     async updateFolderStatus(folderPath: string): Promise<void> {
         if (this.updatingFolders.has(folderPath)) {
+            return;
+        }
+        
+        // 检查缓存是否有效
+        const cached = this.folderStatusCache.get(folderPath);
+        const now = Date.now();
+        
+        if (cached && (now - cached.timestamp) < this.cacheExpiryTime) {
+            if (isDebugEnabled()) {
+                logDebug(`Using cached status for folder: ${folderPath}`);
+            }
+            
+            // 使用缓存的状态
+            const updatedPaths: string[] = [];
+            cached.statusMap.forEach((status, filePath) => {
+                const oldStatus = this.statusCache.get(filePath);
+                if (!oldStatus || JSON.stringify(oldStatus) !== JSON.stringify(status)) {
+                    this.statusCache.set(filePath, status);
+                    updatedPaths.push(filePath);
+                }
+            });
+            
+            if (updatedPaths.length > 0) {
+                const uris = updatedPaths
+                    .map(filePath => {
+                        try {
+                            return vscode.Uri.file(filePath);
+                        } catch {
+                            return null;
+                        }
+                    })
+                    .filter((uri): uri is vscode.Uri => uri !== null);
+                
+                if (uris.length > 0) {
+                    this.decorationChangeEmitter.fire(uris);
+                }
+            }
+            
             return;
         }
         
@@ -859,13 +968,19 @@ class FileStatusDecorator {
             }
             
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] Getting status for folder: ${folderPath}`);
+                logDebug(`Getting status for folder: ${folderPath}`);
             }
             
             const statusMap = await getFolderStatus(folderPath);
             
+            // 更新缓存
+            this.folderStatusCache.set(folderPath, {
+                statusMap,
+                timestamp: now
+            });
+            
             if (isDebugEnabled()) {
-                console.log(`[DEBUG] Got ${statusMap.size} status entries from soscmd`);
+                logDebug(`Got ${statusMap.size} status entries from soscmd and cached`);
             }
             
             const updatedPaths: string[] = [];
@@ -894,7 +1009,7 @@ class FileStatusDecorator {
             }
         } catch (error) {
             if (isDebugEnabled()) {
-                console.error(`[ERROR] Failed to update folder status for ${folderPath}: ${error instanceof Error ? error.message : String(error)}`);
+                logError(`Failed to update folder status for ${folderPath}: ${error instanceof Error ? error.message : String(error)}`);
             }
         } finally {
             this.updatingFolders.delete(folderPath);
@@ -903,6 +1018,17 @@ class FileStatusDecorator {
     
     clearCache(): void {
         this.statusCache.clear();
+        this.folderStatusCache.clear();
+    }
+    
+    clearFolderCache(folderPath: string): void {
+        this.folderStatusCache.delete(folderPath);
+        // 也清除该文件夹下所有文件的状态缓存
+        for (const filePath of this.statusCache.keys()) {
+            if (filePath.startsWith(folderPath)) {
+                this.statusCache.delete(filePath);
+            }
+        }
     }
     
     dispose(): void {
@@ -911,9 +1037,15 @@ class FileStatusDecorator {
             this.periodicUpdateTimer = undefined;
         }
         
+        if (this.debounceTimer) {
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = undefined;
+        }
+        
         this.decorationChangeEmitter.dispose();
         
         this.statusCache.clear();
+        this.folderStatusCache.clear();
         this.updatingFolders.clear();
         
         if (this.fileDecorationProviderRegistration) {
