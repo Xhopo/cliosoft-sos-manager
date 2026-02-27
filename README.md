@@ -1,0 +1,1 @@
+# cliosoft-sos-manager
