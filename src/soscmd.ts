@@ -25,6 +25,48 @@ export interface FileStatus {
     log: string;       // 日志
 }
 
+/**
+ * Convert technical SOS error messages to user-friendly descriptions
+ */
+function getUserFriendlyError(output: string, command?: string): string {
+    if (!output) {
+        return 'Unknown error occurred';
+    }
+
+    // Common error patterns
+    if (output.includes('No valid objects selected')) {
+        return 'File is not under SOS version control';
+    }
+    if (output.includes('has been checked out')) {
+        return 'File is already checked out. Please check it in or discard changes first';
+    }
+    if (output.includes('Permission denied') || output.includes('Access denied')) {
+        return 'Permission denied. Please check your access rights';
+    }
+    if (output.includes('not found') || output.includes('does not exist')) {
+        return 'File or resource not found';
+    }
+    if (output.includes('locked by another user')) {
+        return 'File is locked by another user';
+    }
+    if (output.includes('network') || output.includes('connection')) {
+        return 'Network connection error. Please check your connection to the SOS server';
+    }
+
+    // Extract first meaningful error line
+    const lines = output.split('\n').filter(line =>
+        line.trim().length > 0 &&
+        (line.includes('Error') || line.includes('error') || line.includes('failed'))
+    );
+
+    if (lines.length > 0) {
+        return lines[0].trim();
+    }
+
+    return 'Operation failed. Check output channel for details';
+}
+
+
 // 执行soscmd命令
 export function executeSoscmd(command: string, cwd?: string, showError?: boolean): Promise<string>;
 export function executeSoscmd(args: string[], cwd?: string, showError?: boolean): Promise<string>;
@@ -66,11 +108,12 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
                         logDebug(`Full stderr: ${stderr}`);
                     }
                 }
-                
                 if (code !== 0) {
-                    const errorMessage = `soscmd execution failed with exit code ${code}\nCommand: soscmd ${commandOrArgs.join(' ')}\nstdout: ${stdout}\nstderr: ${stderr}`;
+                    const userFriendlyError = getUserFriendlyError(stderr || stdout, commandOrArgs[0]);
+                    const errorMessage = `SOS command failed: ${userFriendlyError}`;
+
                     if (showError) {
-                        logError(errorMessage);
+                        logError(`Command: soscmd ${commandOrArgs.join(' ')}\nExit code: ${code}\nOutput: ${stdout}\nError: ${stderr}`);
                         vscode.window.showErrorMessage(errorMessage);
                     } else {
                         logDebug(`Command failed (suppressed): soscmd ${commandOrArgs.join(' ')}`);
@@ -78,9 +121,9 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
                     reject(new Error(errorMessage));
                     return;
                 }
-                
-                if (stderr) {
-                    console.log(`[WARNING] Command completed with stderr: ${stderr}`);
+
+                if (stderr && isDebugEnabled()) {
+                    logDebug(`Command completed with stderr: ${stderr}`);
                 }
                 
                 if (isDebugEnabled()) {
@@ -88,9 +131,9 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
                 }
                 resolve(stdout);
             });
-            
+
             proc.on('error', (error) => {
-                const errorMessage = `soscmd spawn error: ${error.message}`;
+                const errorMessage = `Failed to execute soscmd: ${error.message}`;
                 if (showError) {
                     logError(errorMessage);
                     vscode.window.showErrorMessage(errorMessage);
@@ -121,16 +164,11 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
                 }
                 
                 if (error) {
-                    errorMessage = `soscmd execution failed: ${error.message}`;
-                    if (cwd) {
-                        errorMessage += ` (Working directory: ${cwd})`;
-                    }
-                    errorMessage += `\nCommand: ${command}`;
-                    errorMessage += `\nstdout: ${stdout}`;
-                    errorMessage += `\nstderr: ${stderr}`;
-                    
+                    const userFriendlyError = getUserFriendlyError(stderr || stdout, command.split(' ')[1]);
+                    errorMessage = `SOS command failed: ${userFriendlyError}`;
+
                     if (showError) {
-                        logError(errorMessage);
+                        logError(`Command: ${command}\nWorking directory: ${cwd || 'N/A'}\nOutput: ${stdout}\nError: ${stderr}`);
                         vscode.window.showErrorMessage(errorMessage);
                     } else {
                         logDebug(`Command failed (suppressed): ${command}`);
@@ -138,13 +176,13 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
                     reject(new Error(errorMessage));
                     return;
                 }
-                
-                if (stderr) {
-                    console.log(`[WARNING] Command completed with stderr: ${stderr}`);
+
+                if (stderr && isDebugEnabled()) {
+                    logDebug(`Command completed with stderr: ${stderr}`);
                 }
                 
                 if (isDebugEnabled()) {
-                    console.log(`[DEBUG] Command executed successfully`);
+                    logDebug(`Command executed successfully`);
                 }
                 resolve(stdout);
             });
@@ -193,12 +231,12 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
         // 实际输出格式：Action: checkin | Revision: 1 | Rev ID: 5940 | By: haiming.yin | At time: 2026/01/12 15:46:39 | Checksum: 3850098212 | Size: 891 | Log: Initial revision.
         const versions: FileVersion[] = [];
         const lines = output.split('\n');
-        
+
         if (isDebugEnabled()) {
             logDebug(`Output lines count: ${lines.length}`);
             logDebug(`Raw output: ${output}`);
         }
-        
+
         // 查找包含"Action: checkin"的行，这些行包含版本信息
         for (const line of lines) {
             if (line.trim().startsWith('Action: checkin')) {
@@ -215,11 +253,8 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
                     if (isDebugEnabled()) {
                         logDebug(`Found version: ID=${id.trim()}, By=${ciBy.trim()}, Time=${ciTime.trim()}`);
                     }
-                } else {
-                    if (isDebugEnabled()) {
-                        logDebug(`Line matched but failed to parse: ${line}`);
-                        vscode.window.showWarningMessage(`[DEBUG] Failed to parse version line: ${line}`);
-                    }
+                } else if (isDebugEnabled()) {
+                    logDebug(`Line matched but failed to parse: ${line}`);
                 }
             }
         }
@@ -257,10 +292,10 @@ export function parseStatusLine(statusLine: string): FileStatus | null {
     if (isDebugEnabled()) {
         logDebug(`Parsing status line: ${statusLine}`);
     }
-    
+
     // 尝试将制表符替换为空格，便于正则表达式匹配
     const normalizedLine = statusLine.replace(/\t/g, ' ');
-    
+
     // 首先尝试匹配标准格式: 状态码(6字符) + 空格 + 版本号(数字) + 空格 + 路径
     const statusMatch = normalizedLine.match(/^([fpdFsS])([-OWXN?])([-M!?-])([-L?-])([-N?-])([-R?])\s+(\d+)\s+(.+)$/);
     if (statusMatch) {
@@ -279,7 +314,7 @@ export function parseStatusLine(statusLine: string): FileStatus | null {
         };
         return fileStatus;
     }
-    
+
     // 尝试匹配包含版本号的状态码格式（如7字符：状态码+RsoMatch+Version）
     const statusMatchWithVersion = normalizedLine.match(/^([fpdFsS])([-OWXN?])([-M!?-])([-L?-])([-N?-])([-R?])\s+(\S+)\s+(.+)$/);
     if (statusMatchWithVersion) {
@@ -298,7 +333,7 @@ export function parseStatusLine(statusLine: string): FileStatus | null {
         };
         return fileStatus;
     }
-    
+
     // 最后尝试更宽松的匹配，使用\s*匹配任意数量的空白字符
     const relaxedMatch = normalizedLine.match(/^([fpdFsS])([-OWXN?])([-M!?-])([-L?-])([-N?-])([-R?])\s*(\S+)\s*(.+)$/);
     if (relaxedMatch) {
@@ -317,7 +352,7 @@ export function parseStatusLine(statusLine: string): FileStatus | null {
         };
         return fileStatus;
     }
-    
+
     // 尝试最简单的匹配：前6个字符是状态码，然后是版本号，然后是路径
     const simpleMatch = normalizedLine.match(/^(.{6})\s*(\S+)\s*(.+)$/);
     if (simpleMatch) {
@@ -329,7 +364,7 @@ export function parseStatusLine(statusLine: string): FileStatus | null {
         const lock = statusCode[3] || '-';
         const newRevision = statusCode[4] || '-';
         const rsoMatch = statusCode[5] || '-';
-        
+
         const fileStatus: FileStatus = {
             type,
             state,
@@ -344,19 +379,19 @@ export function parseStatusLine(statusLine: string): FileStatus | null {
         };
         return fileStatus;
     }
-    
+
     // 最终降级处理：按空格分割，启发式匹配
     const parts = normalizedLine.trim().split(/\s+/);
     if (parts.length >= 2) {
         if (isDebugEnabled()) {
             logDebug(`Using fallback parsing with ${parts.length} parts: ${parts.join('|')}`);
         }
-        
+
         // 假设前6个字符是状态码，后面是版本号和路径
         const statusCode = parts[0].padEnd(6, '-');
         const version = parts[1];
         const filePath = parts.slice(2).join(' ');
-        
+
         const fileStatus: FileStatus = {
             type: statusCode[0] || '-',
             state: statusCode[1] || '-',
@@ -369,17 +404,17 @@ export function parseStatusLine(statusLine: string): FileStatus | null {
             time: '',
             log: ''
         };
-        
+
         if (isDebugEnabled()) {
             logDebug(`Fallback parsing result: ${JSON.stringify(fileStatus)}`);
         }
-        
+
         return fileStatus;
     }
-    
+
     // 如果所有匹配都失败，打印详细信息
     if (isDebugEnabled()) {
-        console.log(`[DEBUG] Failed to parse status line: "${statusLine}"`);
+        logDebug(`Failed to parse status line: "${statusLine}"`);
     }
     return null;
 }
@@ -447,7 +482,7 @@ export async function getFileStatus(filePath: string): Promise<FileStatus | null
     } catch (error) {
         // 详细的错误记录（仅在调试模式下）
         if (isDebugEnabled()) {
-            console.error(`[ERROR] getFileStatus failed: ${error instanceof Error ? error.message : String(error)}`);
+            logError(`getFileStatus failed: ${error instanceof Error ? error.message : String(error)}`);
         }
         return null;
     }
@@ -523,6 +558,60 @@ export async function getFolderStatus(folderPath: string): Promise<Map<string, F
     return statusMap;
 }
 
+/**
+ * 递归扫描文件夹，获取所有子文件夹的 SOS 状态
+ * @param folderPath 起始文件夹
+ * @param onFolderScanned 每扫描完一个文件夹的回调，用于增量更新缓存
+ * @param cancellationToken 取消令牌
+ */
+export async function getRecursiveFolderStatus(
+    folderPath: string,
+    onFolderScanned: (folderPath: string, statusMap: Map<string, FileStatus>) => void,
+    cancellationToken?: vscode.CancellationToken
+): Promise<void> {
+    const fs = require('fs');
+
+    if (cancellationToken?.isCancellationRequested) { return; }
+
+    // 获取当前文件夹的直接子项状态
+    let statusMap: Map<string, FileStatus>;
+    try {
+        statusMap = await getFolderStatus(folderPath);
+    } catch {
+        return;
+    }
+    onFolderScanned(folderPath, statusMap);
+
+    // 收集子目录：从 soscmd 结果中找 type='d' 的，以及从文件系统中发现的目录
+    const subdirs = new Set<string>();
+
+    statusMap.forEach((status, filePath) => {
+        if (status.type === 'd') {
+            subdirs.add(filePath);
+        }
+    });
+
+    try {
+        const entries = fs.readdirSync(folderPath, { withFileTypes: true });
+        for (const entry of entries) {
+            if (entry.isDirectory() && !entry.name.startsWith('.')) {
+                subdirs.add(path.join(folderPath, entry.name));
+            }
+        }
+    } catch { /* ignore permission errors */ }
+
+    // 递归扫描子目录，并发限制 3 个
+    const SCAN_CONCURRENCY = 3;
+    const dirs = Array.from(subdirs);
+    for (let i = 0; i < dirs.length; i += SCAN_CONCURRENCY) {
+        if (cancellationToken?.isCancellationRequested) { return; }
+        const batch = dirs.slice(i, i + SCAN_CONCURRENCY);
+        await Promise.all(batch.map(dir =>
+            getRecursiveFolderStatus(dir, onFolderScanned, cancellationToken)
+        ));
+    }
+}
+
 // 切换文件版本
 export async function switchFileVersion(filePath: string, versionId: string): Promise<void> {
     try {
@@ -543,7 +632,7 @@ export async function switchFileVersion(filePath: string, versionId: string): Pr
         
         // 构建soscmd userev命令，切换文件版本
         const userevCommand = `soscmd userev "${filePath}/${versionId}"`;
-        
+
         if (isDebugEnabled()) {
             logDebug(`Building userev command: ${userevCommand}`);
         }

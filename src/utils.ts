@@ -77,7 +77,7 @@ export function getPathConfig(pathName: string): string {
  * 替换命令中的变量 - 支持数组格式和自动转义
  */
 export function replaceCommandVariables(
-    command: string, 
+    command: string,
     variables: Record<string, string | string[]>
 ): string {
     let result = command;
@@ -87,8 +87,9 @@ export function replaceCommandVariables(
             const escapedValue = value.map(v => `"${v.replace(/"/g, '\\"')}"`).join(' ');
             result = result.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), escapedValue);
         } else {
-            // 对于字符串，直接替换
-            result = result.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), value);
+            // 对于字符串，如果不是已经带引号的路径，则添加引号
+            const escapedValue = value.includes('"') ? value : '"' + value + '"';
+            result = result.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), escapedValue);
         }
     }
     return result;
@@ -206,11 +207,11 @@ export async function isFileUnderSosControl(filePath: string): Promise<boolean> 
         if (!fs.existsSync(filePath)) {
             return false;
         }
-        
+
         // 检查文件所在目录是否有 SOS 相关文件
         const fileDir = require('path').dirname(filePath);
         const sosConfigPath = require('path').join(fileDir, '.sos');
-        
+
         return fs.existsSync(sosConfigPath);
     } catch {
         return false;

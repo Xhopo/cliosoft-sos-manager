@@ -1,0 +1,27 @@
+{
+  "name": "cps-ragflow-query-skill",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "scripts/cps-ragflow.js",
+  "scripts": {
+    "status": "bun --no-env-file --bun scripts/cps-ragflow.js status --json",
+    "status:node": "node scripts/cps-ragflow.js status --json",
+    "datasets": "bun --no-env-file --bun scripts/cps-ragflow.js datasets --json",
+    "datasets:node": "node scripts/cps-ragflow.js datasets --json",
+    "query": "bun --no-env-file --bun scripts/cps-ragflow.js query --json",
+    "query:node": "node scripts/cps-ragflow.js query --json",
+    "test": "bun test tests/*.test.cjs",
+    "test:node": "node --test tests/*.test.cjs"
+  },
+  "keywords": [
+    "cps",
+    "ragflow",
+    "skill",
+    "knowledge-base",
+    "datasheet",
+    "qi",
+    "ufcs"
+  ],
+  "license": "MIT"
+}

@@ -2,7 +2,7 @@
   "name": "cliosoft-sos-manager",
   "displayName": "ClioSoft SOS Manager",
   "description": "VSCode extension for ClioSoft SOS Manager, allowing users to view and switch file versions",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "xhopo",
   "author": "xhopo with trae",
   "icon": "resources/cliosoft-icon.png",
@@ -24,7 +24,11 @@
     "onCommand:cliosoft-sos-manager.officeOpen",
     "onCommand:cliosoft-sos-manager.compileRtl",
     "onCommand:cliosoft-sos-manager.rebuildCtags",
-    "onView:cliosoft-sos-manager.fileVersions"
+    "onCommand:cliosoft-sos-manager.quickCheckout",
+    "onCommand:cliosoft-sos-manager.quickCheckin",
+    "onCommand:cliosoft-sos-manager.quickDiscard",
+    "onView:cliosoft-sos-manager.fileVersions",
+    "onView:cliosoft-sos-manager.filteredStatus"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -68,9 +72,94 @@
         "command": "cliosoft-sos-manager.toggleRefresh",
         "title": "Toggle status refresh",
         "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.quickCheckout",
+        "title": "Quick Check Out (Active File)",
+        "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.quickCheckin",
+        "title": "Quick Check In (Active File)",
+        "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.quickDiscard",
+        "title": "Quick Discard (Active File)",
+        "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.refreshFilteredStatus",
+        "title": "Refresh Changed Files",
+        "category": "ClioSoft SOS",
+        "icon": "$(refresh)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "cliosoft-sos-manager.quickCheckout",
+        "key": "ctrl+alt+o",
+        "mac": "cmd+alt+o",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "cliosoft-sos-manager.quickCheckin",
+        "key": "ctrl+alt+i",
+        "mac": "cmd+alt+i",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "cliosoft-sos-manager.quickDiscard",
+        "key": "ctrl+alt+d",
+        "mac": "cmd+alt+d",
+        "when": "editorTextFocus"
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "cliosoft-sos-manager.refreshFilteredStatus",
+          "when": "view == cliosoft-sos-manager.filteredStatus",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "cliosoft-sos-manager.checkout",
+          "when": "viewItem == filteredFile",
+          "group": "cliosoft-sos@1"
+        },
+        {
+          "command": "cliosoft-sos-manager.checkin",
+          "when": "viewItem == filteredFile",
+          "group": "cliosoft-sos@2"
+        },
+        {
+          "command": "cliosoft-sos-manager.diff",
+          "when": "viewItem == filteredFile",
+          "group": "cliosoft-sos@3"
+        },
+        {
+          "command": "cliosoft-sos-manager.discard",
+          "when": "viewItem == filteredFile",
+          "group": "cliosoft-sos@4"
+        },
+        {
+          "command": "cliosoft-sos-manager.checkout",
+          "when": "viewItem == filteredFolder",
+          "group": "cliosoft-sos@1"
+        },
+        {
+          "command": "cliosoft-sos-manager.checkin",
+          "when": "viewItem == filteredFolder",
+          "group": "cliosoft-sos@2"
+        },
+        {
+          "command": "cliosoft-sos-manager.discard",
+          "when": "viewItem == filteredFolder",
+          "group": "cliosoft-sos@4"
+        }
+      ],
       "explorer/context": [
         {
           "command": "cliosoft-sos-manager.checkout",
@@ -136,6 +225,10 @@
         {
           "id": "cliosoft-sos-manager.fileVersions",
           "name": "File Versions"
+        },
+        {
+          "id": "cliosoft-sos-manager.filteredStatus",
+          "name": "Changed Files"
         }
       ]
     },

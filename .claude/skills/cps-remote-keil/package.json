@@ -1,0 +1,29 @@
+{
+  "name": "cps-remote-keil-skill",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "scripts/cps-remote-keil.js",
+  "scripts": {
+    "ask": "bun --no-env-file --bun scripts/cps-remote-keil.js ask --json",
+    "ask:node": "node scripts/cps-remote-keil.js ask --json",
+    "edit_build": "bun --no-env-file --bun scripts/cps-remote-keil.js edit_build --json",
+    "edit_build:node": "node scripts/cps-remote-keil.js edit_build --json",
+    "status": "bun --no-env-file --bun scripts/cps-remote-keil.js status --json",
+    "status:node": "node scripts/cps-remote-keil.js status --json",
+    "verify:8610": "bun --no-env-file --bun scripts/cps-remote-keil.js verify --workspace 8610 --json",
+    "verify:8610:node": "node scripts/cps-remote-keil.js verify --workspace 8610 --json",
+    "verify:4050": "bun --no-env-file --bun scripts/cps-remote-keil.js verify --workspace 4050 --json",
+    "verify:4050:node": "node scripts/cps-remote-keil.js verify --workspace 4050 --json"
+  },
+  "keywords": [
+    "cps",
+    "keil",
+    "8610",
+    "4050",
+    "firmware",
+    "hex",
+    "embedded"
+  ],
+  "license": "MIT"
+}

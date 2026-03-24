@@ -1,0 +1,35 @@
+{
+  "name": "imap-smtp-email-skill",
+  "version": "1.0.0",
+  "description": "CPS-first IMAP/SMTP email skill with Bun-first CLIs. Defaults @convenientpower.com to NetEase 163 enterprise mail and supports standard IMAP/SMTP providers.",
+  "main": "scripts/imap.js",
+  "scripts": {
+    "configure": "bun --no-env-file --bun scripts/configure.js apply",
+    "doctor": "bun --no-env-file --bun scripts/configure.js doctor",
+    "check": "bun --no-env-file --bun scripts/imap.js check",
+    "fetch": "bun --no-env-file --bun scripts/imap.js fetch",
+    "search": "bun --no-env-file --bun scripts/imap.js search",
+    "send": "bun --no-env-file --bun scripts/smtp.js send",
+    "verify": "bun --no-env-file --bun scripts/smtp.js verify",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "imapflow": "^1.2.12",
+    "mailparser": "^3.9.3",
+    "nodemailer": "^7.0.13"
+  },
+  "keywords": [
+    "imap",
+    "smtp",
+    "email",
+    "163.com",
+    "126.com",
+    "188.com",
+    "gmail",
+    "outlook",
+    "skill"
+  ],
+  "author": "NetEase",
+  "license": "MIT"
+}
