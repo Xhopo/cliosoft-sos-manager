@@ -612,6 +612,62 @@ export async function getRecursiveFolderStatus(
     }
 }
 
+/**
+ * 一次性获取工作区中所有"值得关注"的文件状态（checked out / modified / missing / needs update）。
+ * 利用 soscmd select 参数递归扫描，替代逐文件夹调用。
+ */
+export async function getInterestingStatus(
+    workspaceRoot: string,
+    cancellationToken?: vscode.CancellationToken
+): Promise<Map<string, FileStatus>> {
+    const statusMap = new Map<string, FileStatus>();
+
+    if (cancellationToken?.isCancellationRequested) { return statusMap; }
+
+    try {
+        // -sco: checked out, -suco: checked out without lock,
+        // -sncm: not checked out but modified, -sne: missing, -snt: needs update
+        // status 命令默认 OR 模式，select 参数自带递归
+        const output = await executeSoscmd(
+            ['status', '*', '-sco', '-suco', '-sncm', '-sne', '-snt'],
+            workspaceRoot,
+            false
+        );
+
+        if (cancellationToken?.isCancellationRequested) { return statusMap; }
+
+        const lines = output.trim().split('\n');
+        for (const line of lines) {
+            if (line.trim().length === 0 || line.includes('@@ Error') || line.includes('Error:')) {
+                continue;
+            }
+
+            const status = parseStatusLine(line);
+            if (!status) { continue; }
+
+            // 输出路径是相对路径（如 ./design_data/xxx），转为绝对路径
+            let filePath = status.path;
+            if (filePath.startsWith('./')) {
+                filePath = path.join(workspaceRoot, filePath.substring(2));
+            } else if (!path.isAbsolute(filePath)) {
+                filePath = path.join(workspaceRoot, filePath);
+            }
+
+            statusMap.set(filePath, { ...status, path: filePath });
+        }
+
+        if (isDebugEnabled()) {
+            logDebug(`getInterestingStatus: found ${statusMap.size} interesting files`);
+        }
+    } catch (error) {
+        if (isDebugEnabled()) {
+            logError(`getInterestingStatus failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    return statusMap;
+}
+
 // 切换文件版本
 export async function switchFileVersion(filePath: string, versionId: string): Promise<void> {
     try {

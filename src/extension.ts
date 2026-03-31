@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { FileStatus, getFolderStatus, getFileVersions, switchFileVersion, executeSoscmd, FileVersion, getFileStatus, getRecursiveFolderStatus } from './soscmd';
+import { FileStatus, getFolderStatus, getFileVersions, switchFileVersion, executeSoscmd, FileVersion, getFileStatus, getRecursiveFolderStatus, getInterestingStatus } from './soscmd';
 import { isDebugEnabled, logDebug, logError, isCommandEnabled, getCommandConfig, replaceCommandVariables, BATCH_SIZE, isPlatformSupported, showPlatformWarning } from './utils';
 import { FilteredStatusTreeDataProvider } from './filteredStatusTree';
 
@@ -729,14 +730,21 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     fileStatusDecorator = new FileStatusDecorator();
-    // 新增：初始化刷新
+
+    // 设置磁盘缓存路径并尝试加载
+    const diskCachePath = path.join(context.globalStorageUri.fsPath, 'statusCache.json');
+    fileStatusDecorator.setDiskCachePath(diskCachePath);
+    const hasDiskCache = fileStatusDecorator.loadDiskCache();
+
+    // 初始化刷新（仅限磁盘文件）
     vscode.workspace.textDocuments.forEach(doc => {
+        if (doc.uri.scheme !== 'file') { return; }
         const filePath = doc.uri.fsPath;
         if (filePath) {
             fileStatusDecorator.updateFileAndAncestors(filePath);
         }
     });
-    if (vscode.window.activeTextEditor) {
+    if (vscode.window.activeTextEditor && vscode.window.activeTextEditor.document.uri.scheme === 'file') {
         treeDataProvider.setFile(vscode.window.activeTextEditor.document.uri.fsPath);
     }
 
@@ -782,20 +790,20 @@ export function activate(context: vscode.ExtensionContext) {
             })
         );
 
-        // 视图首次可见且树为空时自动触发扫描
+        // 视图首次可见时：有磁盘缓存则跳过全量扫描，否则触发扫描
         context.subscriptions.push(
             filteredTreeView.onDidChangeVisibility(e => {
-                if (e.visible && filteredTreeProvider!.isEmpty()) {
+                if (e.visible && filteredTreeProvider!.isEmpty() && !hasDiskCache) {
                     vscode.commands.executeCommand('cliosoft-sos-manager.refreshFilteredStatus');
                 }
             })
         );
     }
 
-    // 监听文本编辑器变化（文本文件）
+    // 监听文本编辑器变化（仅限磁盘文件）
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor((editor) => {
-            if (editor && editor.document) {
+            if (editor && editor.document && editor.document.uri.scheme === 'file') {
                 fileStatusDecorator.updateFileAndAncestors(editor.document.uri.fsPath);
                 treeDataProvider.setFile(editor.document.uri.fsPath);
             }
@@ -809,9 +817,10 @@ export function activate(context: vscode.ExtensionContext) {
     //     })
     // );
     
-    // 监听文件打开事件
+    // 监听文件打开事件（仅限磁盘文件，排除 Output Channel 等虚拟文档）
     context.subscriptions.push(
         vscode.workspace.onDidOpenTextDocument((document) => {
+            if (document.uri.scheme !== 'file') { return; }
             fileStatusDecorator.updateFileAndAncestors(document.uri.fsPath);
         })
     );
@@ -820,9 +829,9 @@ export function activate(context: vscode.ExtensionContext) {
     // 使用VSCode的Tab Groups API来监听所有类型的标签页变化
     let lastActiveTab: string | undefined;
     
-    // 监听标签页变化事件（文本编辑器）
+    // 监听标签页变化事件（仅限磁盘文件）
     const tabChangeListener = vscode.window.onDidChangeActiveTextEditor((editor) => {
-        if (editor && editor.document) {
+        if (editor && editor.document && editor.document.uri.scheme === 'file') {
             const currentFile = editor.document.uri.fsPath;
             if (currentFile !== lastActiveTab) {
                 lastActiveTab = currentFile;
@@ -842,7 +851,7 @@ export function activate(context: vscode.ExtensionContext) {
                     let filePath: string | undefined;
 
                     const input = activeTab.input as any;
-                    if (input.uri) {
+                    if (input.uri && input.uri.scheme === 'file') {
                         filePath = input.uri.fsPath;
                     }
 
@@ -877,7 +886,7 @@ export function activate(context: vscode.ExtensionContext) {
                         let filePath: string | undefined;
 
                         const input = activeTab.input as any;
-                        if (input.uri) {
+                        if (input.uri && input.uri.scheme === 'file') {
                             filePath = input.uri.fsPath;
                         }
 
@@ -922,7 +931,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         const activeEditor = vscode.window.activeTextEditor;
-        if (activeEditor && activeEditor.document) {
+        if (activeEditor && activeEditor.document && activeEditor.document.uri.scheme === 'file') {
             fileStatusDecorator.updateFileAndAncestors(activeEditor.document.uri.fsPath);
         }
     }, STATUS_REFRESH_INTERVAL);
@@ -933,9 +942,10 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
     
-    // 添加文件变化监听器，实时更新文件状态
+    // 添加文件变化监听器，实时更新文件状态（仅限磁盘文件，排除 Output Channel 等虚拟文档）
     context.subscriptions.push(
         vscode.workspace.onDidChangeTextDocument(async (event) => {
+            if (event.document.uri.scheme !== 'file') { return; }
             const filePath = event.document.uri.fsPath;
             if (isDebugEnabled()) {
                 logDebug(`File changed: ${filePath}`);
@@ -950,9 +960,10 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
     
-    // 添加文件保存监听器
+    // 添加文件保存监听器（仅限磁盘文件）
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument(async (document) => {
+            if (document.uri.scheme !== 'file') { return; }
             const filePath = document.uri.fsPath;
             if (isDebugEnabled()) {
                 logDebug(`File saved: ${filePath}`);
@@ -1003,6 +1014,7 @@ class FileStatusDecorator {
     private readonly cacheExpiryTime = CACHE_EXPIRY_TIME;
     private readonly debounceTimeout = DEBOUNCE_TIMEOUT;
     private debounceTimer: NodeJS.Timeout | undefined;
+    private diskCachePath: string | undefined;
     
     constructor() {
         this.statusBarItem = vscode.window.createStatusBarItem('cliosoft-sos-manager.refreshToggle', vscode.StatusBarAlignment.Right, 100);
@@ -1015,44 +1027,55 @@ class FileStatusDecorator {
             provideFileDecoration: (uri: vscode.Uri) => {
                 const filePath = uri.fsPath;
                 const status = this.statusCache.get(filePath);
-                
+
                 if (!status) {
                     return undefined;
                 }
-                
+
+                // badge 最多 2 个字符（VS Code 限制），用短字母标记
+                // 优先级：New Revision > Modified > Checked Out > Checked In
                 let badge = '';
-                let color = undefined;
-                let tooltip = '';
-                
+                let color: vscode.ThemeColor | undefined;
+                const tooltipParts: string[] = [];
+
                 if (status.state === 'O' || status.state === 'W') {
-                    badge = '🔑';
-                    color = new vscode.ThemeColor('gitDecoration.modifiedResourceForeground');
-                    tooltip = 'Checked Out';
+                    tooltipParts.push('Checked Out');
                     if (status.change === 'M') {
-                        badge += '✏️';
-                        color = new vscode.ThemeColor('gitDecoration.modifiedResourceForeground');
-                        tooltip = 'Modified';
+                        badge = 'M';
+                        color = new vscode.ThemeColor('gitDecoration.modifiedResourceForeground');  // 橙/黄
+                        tooltipParts.push('Modified');
+                    } else {
+                        badge = 'CO';
+                        color = new vscode.ThemeColor('gitDecoration.addedResourceForeground');     // 绿
                     }
+                } else if (status.change === 'M') {
+                    badge = 'M';
+                    color = new vscode.ThemeColor('gitDecoration.stageModifiedResourceForeground'); // 深橙
+                    tooltipParts.push('Modified (not checked out)');
+                } else if (status.change === '!') {
+                    badge = 'D';
+                    color = new vscode.ThemeColor('gitDecoration.deletedResourceForeground');       // 红
+                    tooltipParts.push('Deleted');
                 } else if (status.state === '-') {
-                    badge = '🔒';
-                    color = new vscode.ThemeColor('gitDecoration.untrackedResourceForeground');
-                    tooltip = 'Checked In (Locked)';
+                    badge = 'CI';
+                    color = new vscode.ThemeColor('gitDecoration.untrackedResourceForeground');     // 灰/暗绿
+                    tooltipParts.push('Checked In');
                 }
-                
+
                 if (status.newRevision === 'N') {
-                    badge += '⚠️';
-                    color = new vscode.ThemeColor('gitDecoration.deletedResourceForeground');
-                    tooltip += ' (Has New Revision)';
+                    badge = badge ? badge[0] + '!' : 'N!';
+                    color = new vscode.ThemeColor('gitDecoration.conflictingResourceForeground');   // 红/紫（醒目）
+                    tooltipParts.push('Has New Revision');
                 }
-                
+
                 if (badge) {
                     return {
                         badge,
                         color,
-                        tooltip
+                        tooltip: tooltipParts.join(', ')
                     };
                 }
-                
+
                 return undefined;
             },
             onDidChangeFileDecorations: this.decorationChangeEmitter.event
@@ -1069,32 +1092,87 @@ class FileStatusDecorator {
     }
 
     /**
-     * 全量递归扫描工作区，填充 statusCache
+     * 全量扫描工作区，填充 statusCache。
+     * 使用 soscmd select 参数一次性获取所有 interesting 文件，替代逐文件夹递归。
      */
     async performFullWorkspaceScan(
         workspaceRoot: string,
         progress?: vscode.Progress<{ message?: string }>,
         cancellationToken?: vscode.CancellationToken
     ): Promise<void> {
-        let scannedCount = 0;
-        await getRecursiveFolderStatus(
-            workspaceRoot,
-            (folderPath, statusMap) => {
-                this.folderStatusCache.set(folderPath, {
-                    statusMap,
-                    timestamp: Date.now()
-                });
-                statusMap.forEach((status, filePath) => {
-                    this.statusCache.set(filePath, status);
-                });
-                scannedCount++;
-                progress?.report({ message: `Scanned ${scannedCount} folders...` });
-            },
-            cancellationToken
-        );
+        progress?.report({ message: 'Querying SOS for changed files...' });
+
+        const statusMap = await getInterestingStatus(workspaceRoot, cancellationToken);
+
+        if (cancellationToken?.isCancellationRequested) { return; }
+
+        // 全量刷新：先清除旧缓存，再填入最新结果
+        this.statusCache.clear();
+        this.folderStatusCache.clear();
+        statusMap.forEach((status, filePath) => {
+            this.statusCache.set(filePath, status);
+        });
+
+        progress?.report({ message: `Found ${statusMap.size} changed files` });
+
         // 扫描完成后通知装饰器刷新 + 通知过滤树重建
         this.decorationChangeEmitter.fire(undefined);
         this._onDidUpdateStatus.fire();
+        // 持久化到磁盘
+        this.saveDiskCache();
+    }
+
+    /**
+     * 设置磁盘缓存文件路径（由 activate 传入 globalStoragePath）
+     */
+    setDiskCachePath(cachePath: string): void {
+        this.diskCachePath = cachePath;
+    }
+
+    /**
+     * 从磁盘加载上次扫描的 statusCache，立即填充内存并触发 UI 刷新。
+     * 返回是否成功加载了缓存。
+     */
+    loadDiskCache(): boolean {
+        if (!this.diskCachePath) { return false; }
+        try {
+            if (!fs.existsSync(this.diskCachePath)) { return false; }
+            const raw = fs.readFileSync(this.diskCachePath, 'utf-8');
+            const data: { timestamp: number; entries: [string, FileStatus][] } = JSON.parse(raw);
+            if (!Array.isArray(data.entries) || data.entries.length === 0) { return false; }
+
+            for (const [filePath, status] of data.entries) {
+                this.statusCache.set(filePath, status);
+            }
+            this.decorationChangeEmitter.fire(undefined);
+            this._onDidUpdateStatus.fire();
+            logDebug(`Loaded ${data.entries.length} cached status entries from disk (saved ${new Date(data.timestamp).toLocaleString()})`);
+            return true;
+        } catch (e) {
+            logDebug(`Failed to load disk cache: ${e}`);
+            return false;
+        }
+    }
+
+    /**
+     * 将当前 statusCache 写入磁盘
+     */
+    private saveDiskCache(): void {
+        if (!this.diskCachePath) { return; }
+        try {
+            const dir = path.dirname(this.diskCachePath);
+            if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
+            }
+            const data = {
+                timestamp: Date.now(),
+                entries: Array.from(this.statusCache.entries())
+            };
+            fs.writeFileSync(this.diskCachePath, JSON.stringify(data), 'utf-8');
+            logDebug(`Saved ${data.entries.length} status entries to disk cache`);
+        } catch (e) {
+            logDebug(`Failed to save disk cache: ${e}`);
+        }
     }
 
     toggleRefresh(): void {
@@ -1131,56 +1209,19 @@ class FileStatusDecorator {
                 return;
             }
 
-            const foldersToUpdate: string[] = [];
-            let currentPath = path.dirname(filePath);
-            const workspaceRoot = workspaceFolder.uri.fsPath;
-
-            // 对文件所在的直接父文件夹强制清除缓存，确保同级项状态最新
-            const immediateParent = currentPath;
-            this.folderStatusCache.delete(immediateParent);
-
-            while (currentPath && currentPath.length >= workspaceRoot.length) {
-                if (!path.basename(currentPath).startsWith('.')) {
-                    foldersToUpdate.push(currentPath);
-                }
-
-                const parentPath = path.dirname(currentPath);
-
-                if (parentPath === currentPath) {
-                    break;
-                }
-
-                currentPath = parentPath;
-            }
-
-            // 确保 workspaceRoot 在列表中（去重）
-            if (foldersToUpdate.indexOf(workspaceRoot) === -1) {
-                foldersToUpdate.push(workspaceRoot);
-            }
+            // 只更新文件所在的直接父文件夹，不再遍历所有祖先
+            // 祖先文件夹的状态由全量扫描和缓存覆盖
+            const folderPath = path.dirname(filePath);
+            this.folderStatusCache.delete(folderPath);
 
             if (isDebugEnabled()) {
-                logDebug(`Updating ${foldersToUpdate.length} ancestor folders for: ${filePath}`);
+                logDebug(`Updating folder status for: ${folderPath}`);
             }
 
-            // 逐层更新：每一层调用 updateFolderStatus，
-            // getFolderStatus(folderPath) 执行 soscmd status folderPath/*
-            // 会返回该文件夹下所有直接子项（文件和子文件夹）的状态，
-            // 但不会递归进入子目录。这正好满足"更新同级项但不更新子目录内容"的需求。
-            const chunkSize = Math.min(this.maxConcurrentUpdates, foldersToUpdate.length);
-
-            for (let i = 0; i < foldersToUpdate.length; i += chunkSize) {
-                const chunk = foldersToUpdate.slice(i, i + chunkSize);
-                await Promise.all(chunk.map(async (folderPath) => {
-                    await this.updateFolderStatus(folderPath);
-                }));
-
-                if (i + chunkSize < foldersToUpdate.length) {
-                    await new Promise(resolve => setTimeout(resolve, BATCH_PROCESSING_DELAY));
-                }
-            }
+            await this.updateFolderStatus(folderPath);
         } catch (error) {
             if (isDebugEnabled()) {
-                logError(`Failed to update file and ancestors: ${error instanceof Error ? error.message : String(error)}`);
+                logError(`Failed to update file status: ${error instanceof Error ? error.message : String(error)}`);
             }
         }
     }

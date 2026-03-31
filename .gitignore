@@ -9,6 +9,8 @@ out/
 # Extension packages
 *.vsix
 
+.claude/*
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -40,7 +42,6 @@ dist/
 
 # IDE specific files
 .idea/
-.vscode/
 *.sublime-project
 *.sublime-workspace
 
