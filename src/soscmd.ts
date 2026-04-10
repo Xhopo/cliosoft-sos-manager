@@ -1,7 +1,8 @@
 import { exec, spawn } from 'child_process';
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { isDebugEnabled, logDebug, logError } from './utils';
+import * as fs from 'fs';
+import { isDebugEnabled, logDebug, logError, showSosError } from './utils';
 
 // 定义文件版本接口
 export interface FileVersion {
@@ -52,6 +53,12 @@ function getUserFriendlyError(output: string, command?: string): string {
     if (output.includes('network') || output.includes('connection')) {
         return 'Network connection error. Please check your connection to the SOS server';
     }
+    if (output.includes('timed out') || output.includes('Timed out') || output.includes('ETIMEDOUT')) {
+        return 'Command timed out. The SOS server may be slow or unreachable';
+    }
+    if (output.includes('refused') || output.includes('ECONNREFUSED')) {
+        return 'Connection refused. Please check if the SOS server is running';
+    }
 
     // Extract first meaningful error line
     const lines = output.split('\n').filter(line =>
@@ -79,10 +86,9 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
                 if (cwd) {
                     logDebug(`Working directory: ${cwd}`);
                 }
-                vscode.window.showInformationMessage(`[DEBUG] Executing: soscmd ${commandOrArgs.join(' ')}${cwd ? ` (cwd: ${cwd})` : ''}`);
             }
             
-            const proc = spawn('soscmd', commandOrArgs, { cwd, shell: true });
+            const proc = spawn('soscmd', commandOrArgs, { cwd, shell: true, timeout: 60000 });
             let stdout = '';
             let stderr = '';
             
@@ -114,7 +120,7 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
 
                     if (showError) {
                         logError(`Command: soscmd ${commandOrArgs.join(' ')}\nExit code: ${code}\nOutput: ${stdout}\nError: ${stderr}`);
-                        vscode.window.showErrorMessage(errorMessage);
+                        showSosError(errorMessage);
                     } else {
                         logDebug(`Command failed (suppressed): soscmd ${commandOrArgs.join(' ')}`);
                     }
@@ -136,7 +142,7 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
                 const errorMessage = `Failed to execute soscmd: ${error.message}`;
                 if (showError) {
                     logError(errorMessage);
-                    vscode.window.showErrorMessage(errorMessage);
+                    showSosError(errorMessage);
                 } else {
                     logDebug(`Spawn error (suppressed): ${error.message}`);
                 }
@@ -150,10 +156,9 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
                 if (cwd) {
                     logDebug(`Working directory: ${cwd}`);
                 }
-                vscode.window.showInformationMessage(`[DEBUG] Executing: ${command}${cwd ? ` (cwd: ${cwd})` : ''}`);
             }
             
-            exec(command, { cwd }, (error, stdout, stderr) => {
+            exec(command, { cwd, maxBuffer: 10 * 1024 * 1024, timeout: 60000 }, (error, stdout, stderr) => {
                 let errorMessage = '';
                 
                 if (isDebugEnabled()) {
@@ -169,7 +174,7 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
 
                     if (showError) {
                         logError(`Command: ${command}\nWorking directory: ${cwd || 'N/A'}\nOutput: ${stdout}\nError: ${stderr}`);
-                        vscode.window.showErrorMessage(errorMessage);
+                        showSosError(errorMessage);
                     } else {
                         logDebug(`Command failed (suppressed): ${command}`);
                     }
@@ -196,7 +201,6 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
         // 输出调试信息（仅在调试模式下）
         if (isDebugEnabled()) {
             logDebug(`getFileVersions called with filePath: ${filePath}`);
-            vscode.window.showInformationMessage(`[DEBUG] getFileVersions: ${filePath}`);
         }
         
         // 获取文件所在目录作为工作目录
@@ -222,7 +226,6 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
             // 文件不在sos管理下，返回空数组，不显示错误信息
             if (isDebugEnabled()) {
                 logDebug(`File ${fileName} is not under SOS control`);
-                vscode.window.showInformationMessage(`[DEBUG] File ${fileName} is not under SOS control`);
             }
             return [];
         }
@@ -261,7 +264,6 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
         
         if (isDebugEnabled()) {
             logDebug(`Found ${versions.length} versions`);
-            vscode.window.showInformationMessage(`[DEBUG] Found ${versions.length} versions for ${fileName}`);
         }
         return versions;
     } catch (error) {
@@ -281,138 +283,47 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
         }
         // 其他错误，显示错误信息
         const errorMsg = `Failed to get file versions: ${error instanceof Error ? error.message : String(error)}`;
-        vscode.window.showErrorMessage(errorMsg);
+        showSosError(errorMsg);
         return [];
     }
 }
 
 // 解析单个状态行
 export function parseStatusLine(statusLine: string): FileStatus | null {
-    // 输出原始状态行，便于调试
     if (isDebugEnabled()) {
         logDebug(`Parsing status line: ${statusLine}`);
     }
 
-    // 尝试将制表符替换为空格，便于正则表达式匹配
     const normalizedLine = statusLine.replace(/\t/g, ' ');
 
-    // 首先尝试匹配标准格式: 状态码(6字符) + 空格 + 版本号(数字) + 空格 + 路径
-    const statusMatch = normalizedLine.match(/^([fpdFsS])([-OWXN?])([-M!?-])([-L?-])([-N?-])([-R?])\s+(\d+)\s+(.+)$/);
-    if (statusMatch) {
-        const [, type, state, change, lock, newRevision, rsoMatch, version, fileStatusPath] = statusMatch;
-        const fileStatus: FileStatus = {
-            type,
-            state,
-            change,
-            lock,
-            newRevision,
+    // 统一正则：类型(fpdsFPDS) + 状态5字符 + 空白 + 版本号 + 空白 + 路径
+    const m = normalizedLine.match(/^([fpdsFPDS])([-OWXN?])([-M!?-])([-L?-])([-N?-])([-R?-])\s+(\S+)\s+(.+)$/);
+    if (m) {
+        const [, type, state, change, lock, newRevision, , version, fileStatusPath] = m;
+        return {
+            type, state, change, lock, newRevision,
             revision: version,
-            path: fileStatusPath,
-            author: '',
-            time: '',
-            log: ''
+            path: fileStatusPath.trim(),
+            author: '', time: '', log: ''
         };
-        return fileStatus;
     }
 
-    // 尝试匹配包含版本号的状态码格式（如7字符：状态码+RsoMatch+Version）
-    const statusMatchWithVersion = normalizedLine.match(/^([fpdFsS])([-OWXN?])([-M!?-])([-L?-])([-N?-])([-R?])\s+(\S+)\s+(.+)$/);
-    if (statusMatchWithVersion) {
-        const [, type, state, change, lock, newRevision, rsoMatch, version, fileStatusPath] = statusMatchWithVersion;
-        const fileStatus: FileStatus = {
-            type,
-            state,
-            change,
-            lock,
-            newRevision,
-            revision: version,
-            path: fileStatusPath,
-            author: '',
-            time: '',
-            log: ''
-        };
-        return fileStatus;
-    }
-
-    // 最后尝试更宽松的匹配，使用\s*匹配任意数量的空白字符
-    const relaxedMatch = normalizedLine.match(/^([fpdFsS])([-OWXN?])([-M!?-])([-L?-])([-N?-])([-R?])\s*(\S+)\s*(.+)$/);
-    if (relaxedMatch) {
-        const [, type, state, change, lock, newRevision, rsoMatch, version, fileStatusPath] = relaxedMatch;
-        const fileStatus: FileStatus = {
-            type,
-            state,
-            change,
-            lock,
-            newRevision,
-            revision: version,
-            path: fileStatusPath,
-            author: '',
-            time: '',
-            log: ''
-        };
-        return fileStatus;
-    }
-
-    // 尝试最简单的匹配：前6个字符是状态码，然后是版本号，然后是路径
-    const simpleMatch = normalizedLine.match(/^(.{6})\s*(\S+)\s*(.+)$/);
-    if (simpleMatch) {
-        const [, statusCode, version, fileStatusPath] = simpleMatch;
-        // 解析状态码
-        const type = statusCode[0] || '-';
-        const state = statusCode[1] || '-';
-        const change = statusCode[2] || '-';
-        const lock = statusCode[3] || '-';
-        const newRevision = statusCode[4] || '-';
-        const rsoMatch = statusCode[5] || '-';
-
-        const fileStatus: FileStatus = {
-            type,
-            state,
-            change,
-            lock,
-            newRevision,
-            revision: version,
-            path: fileStatusPath,
-            author: '',
-            time: '',
-            log: ''
-        };
-        return fileStatus;
-    }
-
-    // 最终降级处理：按空格分割，启发式匹配
-    const parts = normalizedLine.trim().split(/\s+/);
-    if (parts.length >= 2) {
-        if (isDebugEnabled()) {
-            logDebug(`Using fallback parsing with ${parts.length} parts: ${parts.join('|')}`);
-        }
-
-        // 假设前6个字符是状态码，后面是版本号和路径
-        const statusCode = parts[0].padEnd(6, '-');
-        const version = parts[1];
-        const filePath = parts.slice(2).join(' ');
-
-        const fileStatus: FileStatus = {
-            type: statusCode[0] || '-',
+    // fallback：前6字符当状态码（仅当首字符是合法类型时）
+    const fb = normalizedLine.match(/^([fpdsFPDS].{5})\s+(\S+)\s+(.+)$/);
+    if (fb) {
+        const [, statusCode, version, fileStatusPath] = fb;
+        return {
+            type: statusCode[0],
             state: statusCode[1] || '-',
             change: statusCode[2] || '-',
             lock: statusCode[3] || '-',
             newRevision: statusCode[4] || '-',
             revision: version,
-            path: filePath,
-            author: '',
-            time: '',
-            log: ''
+            path: fileStatusPath.trim(),
+            author: '', time: '', log: ''
         };
-
-        if (isDebugEnabled()) {
-            logDebug(`Fallback parsing result: ${JSON.stringify(fileStatus)}`);
-        }
-
-        return fileStatus;
     }
 
-    // 如果所有匹配都失败，打印详细信息
     if (isDebugEnabled()) {
         logDebug(`Failed to parse status line: "${statusLine}"`);
     }
@@ -436,7 +347,7 @@ export async function getFileStatus(filePath: string): Promise<FileStatus | null
         }
         
         // 检查文件是否存在
-        const fs = require('fs');
+
         if (!fs.existsSync(filePath)) {
             if (isDebugEnabled()) {
                 logDebug(`File not found: ${filePath}`);
@@ -491,125 +402,43 @@ export async function getFileStatus(filePath: string): Promise<FileStatus | null
 // 获取文件夹下所有文件的状态
 export async function getFolderStatus(folderPath: string): Promise<Map<string, FileStatus>> {
     const statusMap = new Map<string, FileStatus>();
-    
+
     try {
-        // 输出调试信息（仅在调试模式下）
+        if (!fs.existsSync(folderPath)) {
+            return statusMap;
+        }
+
         if (isDebugEnabled()) {
             logDebug(`getFolderStatus called with folderPath: ${folderPath}`);
         }
-        
-        // 检查文件夹是否存在
-        const fs = require('fs');
-        if (!fs.existsSync(folderPath)) {
-            if (isDebugEnabled()) {
-                logDebug(`Folder not found: ${folderPath}`);
-            }
-            return statusMap;
-        }
-        
-        // 使用soscmd status folderPath/*获取整个文件夹的状态
-        const command = `soscmd status ${folderPath}/*`;
-        
-        if (isDebugEnabled()) {
-            logDebug(`Building folder status command: ${command}`);
-            logDebug(`Working directory: ${folderPath}`);
-        }
-        
-        // 调用executeSoscmd时不显示错误信息
-        const output = await executeSoscmd(command, folderPath, false);
-        
-        // 解析命令输出
+
+        const output = await executeSoscmd(['status', '*'], folderPath, false);
         const lines = output.trim().split('\n');
-        
+
         for (const line of lines) {
-            if (line.trim().length === 0 || line.includes('@@ Error')) {
+            if (line.trim().length === 0 || line.includes('@@ Error') || line.includes('Error:')) {
                 continue;
             }
-            
-            // 检查是否是错误信息
-            if (line.includes('Error:')) {
-                if (isDebugEnabled()) {
-                    logDebug(`Error in folder status output: ${line}`);
-                }
-                continue;
-            }
-            
-            // 解析状态行
+
             const status = parseStatusLine(line);
-            if (status) {
-                // 获取文件名
-                const fileName = path.basename(status.path);
-                // 构建完整文件路径
-                const fullPath = path.join(folderPath, fileName);
-                statusMap.set(fullPath, status);
-            }
+            if (!status) { continue; }
+
+            const filePath = path.isAbsolute(status.path)
+                ? status.path
+                : path.join(folderPath, status.path);
+            statusMap.set(filePath, { ...status, path: filePath });
         }
-        
+
         if (isDebugEnabled()) {
             logDebug(`getFolderStatus returned ${statusMap.size} statuses`);
         }
     } catch (error) {
-        // 详细的错误记录（仅在调试模式下）
         if (isDebugEnabled()) {
             logError(`getFolderStatus failed: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
-    
+
     return statusMap;
-}
-
-/**
- * 递归扫描文件夹，获取所有子文件夹的 SOS 状态
- * @param folderPath 起始文件夹
- * @param onFolderScanned 每扫描完一个文件夹的回调，用于增量更新缓存
- * @param cancellationToken 取消令牌
- */
-export async function getRecursiveFolderStatus(
-    folderPath: string,
-    onFolderScanned: (folderPath: string, statusMap: Map<string, FileStatus>) => void,
-    cancellationToken?: vscode.CancellationToken
-): Promise<void> {
-    const fs = require('fs');
-
-    if (cancellationToken?.isCancellationRequested) { return; }
-
-    // 获取当前文件夹的直接子项状态
-    let statusMap: Map<string, FileStatus>;
-    try {
-        statusMap = await getFolderStatus(folderPath);
-    } catch {
-        return;
-    }
-    onFolderScanned(folderPath, statusMap);
-
-    // 收集子目录：从 soscmd 结果中找 type='d' 的，以及从文件系统中发现的目录
-    const subdirs = new Set<string>();
-
-    statusMap.forEach((status, filePath) => {
-        if (status.type === 'd') {
-            subdirs.add(filePath);
-        }
-    });
-
-    try {
-        const entries = fs.readdirSync(folderPath, { withFileTypes: true });
-        for (const entry of entries) {
-            if (entry.isDirectory() && !entry.name.startsWith('.')) {
-                subdirs.add(path.join(folderPath, entry.name));
-            }
-        }
-    } catch { /* ignore permission errors */ }
-
-    // 递归扫描子目录，并发限制 3 个
-    const SCAN_CONCURRENCY = 3;
-    const dirs = Array.from(subdirs);
-    for (let i = 0; i < dirs.length; i += SCAN_CONCURRENCY) {
-        if (cancellationToken?.isCancellationRequested) { return; }
-        const batch = dirs.slice(i, i + SCAN_CONCURRENCY);
-        await Promise.all(batch.map(dir =>
-            getRecursiveFolderStatus(dir, onFolderScanned, cancellationToken)
-        ));
-    }
 }
 
 /**
@@ -625,11 +454,10 @@ export async function getInterestingStatus(
     if (cancellationToken?.isCancellationRequested) { return statusMap; }
 
     try {
-        // -sco: checked out, -suco: checked out without lock,
-        // -sncm: not checked out but modified, -sne: missing, -snt: needs update
+        // -sco: checked out, -suco: checked out without lock
         // status 命令默认 OR 模式，select 参数自带递归
         const output = await executeSoscmd(
-            ['status', '*', '-sco', '-suco', '-sncm', '-sne', '-snt'],
+            ['status', '*', '-sco', '-suco'],
             workspaceRoot,
             false
         );
@@ -668,162 +496,87 @@ export async function getInterestingStatus(
     return statusMap;
 }
 
-// 切换文件版本
-export async function switchFileVersion(filePath: string, versionId: string): Promise<void> {
+// 切换文件版本，返回是否成功
+export async function switchFileVersion(filePath: string, versionId: string): Promise<boolean> {
     try {
-        // 输出调试信息（仅在调试模式下）
         if (isDebugEnabled()) {
             logDebug(`switchFileVersion called with filePath: ${filePath}, versionId: ${versionId}`);
-            vscode.window.showInformationMessage(`[DEBUG] switchFileVersion: ${filePath} -> v${versionId}`);
         }
-        
-        // 获取文件所在目录作为工作目录
+
         const fileDir = path.dirname(filePath);
         const fileName = path.basename(filePath);
-        
+
         if (isDebugEnabled()) {
             logDebug(`File directory: ${fileDir}`);
             logDebug(`File name: ${fileName}`);
         }
-        
-        // 构建soscmd userev命令，切换文件版本
-        const userevCommand = `soscmd userev "${filePath}/${versionId}"`;
 
-        if (isDebugEnabled()) {
-            logDebug(`Building userev command: ${userevCommand}`);
-        }
-        
-        try {
-            // 尝试执行userev命令
+        // 先检查文件是否已被 checkout，如果是则提前提示用户
+        const fileStatus = await getFileStatus(filePath);
+        if (fileStatus && (fileStatus.state === 'O' || fileStatus.state === 'W')) {
             if (isDebugEnabled()) {
-                logDebug(`Attempting userev command...`);
+                logDebug(`File is checked out (state=${fileStatus.state}), prompting user before userev`);
             }
-            await executeSoscmd(userevCommand, fileDir);
-            vscode.window.showInformationMessage(`Successfully switched to version ${versionId}`);
-            if (isDebugEnabled()) {
-                logDebug(`userev command executed successfully`);
-            }
-        } catch (error) {
-            // 详细记录错误（仅在调试模式下）
-            if (isDebugEnabled()) {
-                logError(`userev failed: ${error instanceof Error ? error.message : String(error)}`);
-            }
-            
-            // 检查是否是文件已被checkout的错误
-            if (error instanceof Error && error.message.includes('has been checked out. You must first check it in or cancel the checkout.')) {
-                // 文件已被checkout，需要先执行discard命令，向用户确认
-                const confirmMessage = `File ${fileName} is checked out. Do you want to discard changes and switch to version ${versionId}?`;
+
+            const confirmResult = await vscode.window.showWarningMessage(
+                `File ${fileName} is checked out. Do you want to discard changes and switch to version ${versionId}?`,
+                { modal: true },
+                'Yes',
+                'No'
+            );
+
+            if (confirmResult !== 'Yes') {
                 if (isDebugEnabled()) {
-                    logDebug(`File is checked out, asking user for confirmation...`);
+                    logDebug(`User cancelled discard and version switch`);
                 }
-                
-                // 显示确认对话框，提供Yes/No选项
-                const confirmResult = await vscode.window.showWarningMessage(
-                    confirmMessage,
-                    { modal: true },
-                    'Yes',
-                    'No'
-                );
-                
-                if (confirmResult === 'Yes') {
-                    // 用户确认执行discard操作
-                    vscode.window.showWarningMessage(`Performing discard operation...`);
-                    if (isDebugEnabled()) {
-                        logDebug(`User confirmed discard operation`);
-                    }
-                    
-                    // 执行discard命令，取消checkout
-                    const discardCommand = `soscmd discard -F "${filePath}"`;
-                    if (isDebugEnabled()) {
-                        logDebug(`Building discard command: ${discardCommand}`);
-                    }
-                    
-                    await executeSoscmd(discardCommand, fileDir);
-                    if (isDebugEnabled()) {
-                        logDebug(`discard command executed successfully`);
-                    }
-                    
-                    // 重新执行userev命令
-                    if (isDebugEnabled()) {
-                        logDebug(`Retrying userev command after discard...`);
-                    }
-                    await executeSoscmd(userevCommand, fileDir);
-                    vscode.window.showInformationMessage(`Successfully switched to version ${versionId} after discard`);
-                    if (isDebugEnabled()) {
-                        logDebug(`userev command executed successfully after discard`);
-                    }
-                } else {
-                    // 用户取消操作
-                    if (isDebugEnabled()) {
-                        logDebug(`User cancelled discard and version switch`);
-                    }
-                    vscode.window.showInformationMessage(`Version switch cancelled`);
-                    return;
-                }
-            } else {
-                // 其他错误，重新抛出
-                if (isDebugEnabled()) {
-                    logError(`userev failed with non-checkout error, rethrowing...`);
-                }
-                throw error;
+                vscode.window.showInformationMessage(`Version switch cancelled`);
+                return false;
             }
-        }
-        
-        // 刷新当前编辑器
-        if (isDebugEnabled()) {
-            logDebug(`Refreshing editor for ${filePath}`);
-        }
-        const activeEditor = vscode.window.activeTextEditor;
-        if (activeEditor) {
+
+            // 用户确认，先 discard 再 userev
             if (isDebugEnabled()) {
-                logDebug(`Found active editor, updating content...`);
+                logDebug(`User confirmed discard operation`);
             }
-            
-            const fileUri = vscode.Uri.file(filePath);
-            const content = await vscode.workspace.fs.readFile(fileUri);
-            const text = Buffer.from(content).toString();
-            
+
+            const discardCommand = `soscmd discard -F "${filePath}"`;
+            await executeSoscmd(discardCommand, fileDir);
             if (isDebugEnabled()) {
-                logDebug(`Read file content (${text.length} characters)`);
+                logDebug(`discard command executed successfully`);
             }
-            
-            // 只在内容实际发生变化时才执行编辑操作，避免不必要的dirty标记
-            const currentText = activeEditor.document.getText();
-            if (text !== currentText) {
-                await activeEditor.edit(editBuilder => {
-                    const fullRange = new vscode.Range(
-                        activeEditor.document.positionAt(0),
-                        activeEditor.document.positionAt(currentText.length)
-                    );
-                    editBuilder.replace(fullRange, text);
-                });
-                
-                if (isDebugEnabled()) {
-                    logDebug(`Editor content updated successfully (content changed)`);
-                }
-            } else {
-                if (isDebugEnabled()) {
-                    logDebug(`Editor content not updated (content unchanged)`);
-                }
-            }
-            
-            
         } else {
-            if (isDebugEnabled()) {
-                logDebug(`No active editor found for ${filePath}`);
+            // 非 CO 文件也确认一下，防止意外覆盖
+            const confirmResult = await vscode.window.showWarningMessage(
+                `Switch ${fileName} to version ${versionId}? This will overwrite the local file.`,
+                { modal: true },
+                'Yes',
+                'No'
+            );
+
+            if (confirmResult !== 'Yes') {
+                return false;
             }
         }
-        
+
+        // 执行 userev（文件未 checkout 或已 discard 后）
+        const userevCommand = `soscmd userev "${filePath}/${versionId}"`;
+        if (isDebugEnabled()) {
+            logDebug(`Executing userev command: ${userevCommand}`);
+        }
+
+        await executeSoscmd(userevCommand, fileDir);
+        vscode.window.showInformationMessage(`Successfully switched to version ${versionId}`);
+
         if (isDebugEnabled()) {
             logDebug(`switchFileVersion completed successfully`);
         }
+        return true;
     } catch (error) {
-        // 详细的错误记录（仅在调试模式下记录堆栈跟踪）
         const errorMsg = `Failed to switch version: ${error instanceof Error ? error.message : String(error)}`;
         if (isDebugEnabled()) {
             logError(`switchFileVersion failed: ${errorMsg}`);
             logError(`Stack trace: ${error instanceof Error ? error.stack : ''}`);
         }
-        vscode.window.showErrorMessage(errorMsg);
+        showSosError(errorMsg);
+        return false;
     }
 }

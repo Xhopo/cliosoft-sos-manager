@@ -93,6 +93,11 @@
         "title": "Refresh Changed Files",
         "category": "ClioSoft SOS",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "cliosoft-sos-manager.showOutputChannel",
+        "title": "Show SOS Debug Output",
+        "category": "ClioSoft SOS"
       }
     ],
     "keybindings": [
@@ -158,6 +163,28 @@
           "command": "cliosoft-sos-manager.discard",
           "when": "viewItem == filteredFolder",
           "group": "cliosoft-sos@4"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "cliosoft-sos-manager.checkout",
+          "group": "cliosoft-sos@1",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "cliosoft-sos-manager.checkin",
+          "group": "cliosoft-sos@2",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "cliosoft-sos-manager.diff",
+          "group": "cliosoft-sos@3",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "cliosoft-sos-manager.discard",
+          "group": "cliosoft-sos@4",
+          "when": "resourceScheme == file"
         }
       ],
       "explorer/context": [
@@ -309,6 +336,30 @@
           "type": "string",
           "default": "",
           "description": "Custom rebuildCtags command"
+        },
+        "cliosoft-sos-manager.autoShowOutputOnError": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically show the SOS output panel when an error occurs"
+        },
+        "cliosoft-sos-manager.statusRefreshInterval": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "maximum": 300,
+          "description": "Interval (in seconds) for automatic status refresh of the active file"
+        },
+        "cliosoft-sos-manager.cacheExpiryTime": {
+          "type": "number",
+          "default": 180,
+          "minimum": 30,
+          "maximum": 3600,
+          "description": "Folder status cache expiry time (in seconds)"
+        },
+        "cliosoft-sos-manager.enableDiskCache": {
+          "type": "boolean",
+          "default": true,
+          "description": "Persist status cache to disk for faster startup"
         }
       }
     }

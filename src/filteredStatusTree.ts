@@ -4,14 +4,15 @@ import { FileStatus } from './soscmd';
 import { logDebug, isDebugEnabled } from './utils';
 
 /**
- * 判断文件是否"值得关注"：已修改、已检出、或有新版本
+ * 判断文件是否应出现在 Changed Files 树中：
+ * 已检出、已修改、已删除、有新版本
  */
 export function isFileInteresting(status: FileStatus): boolean {
-    return status.change === 'M'
+    return status.state === 'O'
+        || status.state === 'W'
+        || status.change === 'M'
         || status.change === '!'
-        || status.newRevision === 'N'
-        || status.state === 'O'
-        || status.state === 'W';
+        || status.newRevision === 'N';
 }
 
 /**
@@ -191,6 +192,21 @@ export class FilteredStatusTreeDataProvider implements vscode.TreeDataProvider<F
             }
         }
         return uris;
+    }
+
+    /**
+     * 获取某个文件夹路径下 interesting 文件的数量
+     */
+    getInterestingFileCount(folderPath: string): number {
+        let count = 0;
+        const prefix1 = folderPath + path.sep;
+        const prefix2 = folderPath + '/';
+        for (const filePath of this.interestingFiles) {
+            if (filePath.startsWith(prefix1) || filePath.startsWith(prefix2)) {
+                count++;
+            }
+        }
+        return count;
     }
 
     dispose(): void {
