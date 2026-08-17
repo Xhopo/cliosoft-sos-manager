@@ -17,3 +17,9 @@
 - Prefer local, targeted SOS status refresh after file operations. Full workspace scan is expensive on large SOS workareas and should be user-triggered with clear UI feedback.
 - Do not guess SOS selectors or flag spelling. Use documented help output or user-provided logs; SOSCMD option case matters.
 - When diagnosing slow commands, compare `SOS command success after ...` timings before changing command syntax. The perceived delay may come from extension refresh/rebuild/logging after the SOS command already succeeded.
+
+## 2026-08-17/18 Session: full-scan trigger audit
+
+- (2026-08-18) Audited `performFullWorkspaceScan()` after the v0.46 changes. Its only direct call is inside the `cliosoft-sos-manager.refreshFilteredStatus` command at `src/extension.ts:800-821`.
+- (2026-08-18) Found one remaining indirect automatic trigger at `src/extension.ts:831-835`: when the Changed Files tree first becomes visible, is empty, and has no disk cache, it executes `refreshFilteredStatus`. Therefore the implementation is not yet strictly manual-only.
+- (2026-08-18) No code change was made in this audit. To enforce the user's “only manual refresh performs a full scan” requirement, remove or replace that visibility listener's `executeCommand` call; the empty view can remain empty until the user clicks Refresh.

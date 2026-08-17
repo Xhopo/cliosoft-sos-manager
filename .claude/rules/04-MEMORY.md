@@ -30,7 +30,7 @@ Information should flow from raw notes to topic files, then into this file only 
 
 ## Current Context
 
-- (2026-08-13) ClioSoft SOS Manager v0.45.0 work is tracked in `memory/topics/sos-manager-extension.md`: create-file command, Changed Files scan feedback, corrected SOS selectors, checkout/refresh UX fixes.
+- (2026-08-13) ClioSoft SOS Manager v0.46.0 work is tracked in `memory/topics/sos-manager-extension.md`: create-file command, Changed Files scan feedback, corrected SOS selectors, checkout/refresh UX fixes, and full-scan trigger audit.
 
 ## Durable Lessons
 
