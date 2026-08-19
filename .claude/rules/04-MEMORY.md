@@ -30,10 +30,11 @@ Information should flow from raw notes to topic files, then into this file only 
 
 ## Current Context
 
-- (2026-08-13) ClioSoft SOS Manager v0.46.0 work is tracked in `memory/topics/sos-manager-extension.md`: create-file command, Changed Files scan feedback, corrected SOS selectors, checkout/refresh UX fixes, and full-scan trigger audit.
+- (2026-08-19) ClioSoft SOS Manager v0.47.0 work is tracked in `memory/topics/sos-manager-extension.md`: multi-file per-file Diff, Diff Two SOS Revisions via `file/#/rev`, plus earlier create-file / scan / checkout UX work.
 
 ## Durable Lessons
 
 - (2026-08-13) SOSCMD flags are case-sensitive; never guess selector/option spelling. Verify against `soscmd help` or user-provided output before changing commands.
 - (2026-08-13) Diagnose perceived slowness with command timing before changing SOS syntax. In SOS Manager, slow UI after checkout can be caused by post-command status scan/tree rebuild/log flooding rather than `soscmd co` itself.
 - (2026-08-13) Prefer targeted folder/ancestor refresh after file operations; reserve full workspace Changed Files scans for explicit user-triggered refresh with UI feedback.
+- (2026-08-19) `soscmd diff` compares at most two pathnames of the same file (`path/#/rev` for revisions). Multi-file UX must be N independent diffs, never different files as the two sides of one command.
