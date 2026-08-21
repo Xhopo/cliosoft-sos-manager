@@ -122,6 +122,10 @@ export async function showPlatformWarning(): Promise<void> {
  */
 export const BATCH_SIZE = 50;
 
+export function getSoscmdTimeout(): number {
+    return getConfig().get<number>('soscmdTimeout', 60) * 1000;
+}
+
 /**
  * Show error message with "Show Output" button
  */

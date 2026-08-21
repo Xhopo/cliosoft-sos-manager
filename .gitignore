@@ -51,3 +51,4 @@ out2ai.txt
 # Additional build/output directories
 extension/
 vsix/
+.claude/plans/myagents/

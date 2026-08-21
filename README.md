@@ -4,16 +4,14 @@
 
 This VSCode extension integrates with ClioSoft SOS Manager, providing file status decorations in Explorer and allowing users to view and switch between different versions of files.
 
-## What's New in v0.2.0
+## What's New in v0.47.0
 
-🎉 **Major Bug Fixes and Performance Improvements!**
+**Multi-file Diff & Same-file Revision Compare**
 
-- ✅ Fixed critical bugs (duplicate execution, platform checks, memory leaks)
-- ⚡ 6x faster with improved caching (30s → 3min)
-- 🚀 60% better responsiveness (500ms → 200ms)
-- 💬 User-friendly error messages
-- 📊 Progress notifications for batch operations
-- 🔧 50% lower CPU usage
+- 📁 Explorer / Changed Files multi-select now diffs each file with `soscmd diff -gui <file>`, one by one
+- 🔀 Added **Diff Two SOS Revisions**: workarea/checkout vs one history revision, or two revisions via `file/#/rev`
+- 🚫 Different files are never passed as the two sides of a single `soscmd diff`
+- 🧾 Custom diff commands can use `${filePath}`, `${filePath1}`, `${filePath2}`, `${revision1}`, `${revision2}`
 
 See [CHANGELOG.md](CHANGELOG.md) for full details.
 
@@ -32,11 +30,14 @@ See [CHANGELOG.md](CHANGELOG.md) for full details.
   - Current version indicator: ✓ marks the currently active version
   - **Quick Version Switching**: Click on any version in the list to switch the current file to that version.
 
-- **Context Menu Commands**: Right-click on files in Explorer to access SOS commands:
-  - Check out: Check out the current file without lock
-  - Check in: Check in the current file with comments
-  - Diff: Compare the current file with the last version
+- **Context Menu Commands**: Right-click files, folders, editor tabs, editor content, or Changed Files entries to access SOS commands:
+  - Check out: Check out selected files or folders without lock
+  - Check in: Check in selected files with comments
+  - Diff: Compare each selected file with its SOS default revision (`soscmd diff -gui <file>`). Multiple files are compared one by one, not against each other
+  - Diff Two SOS Revisions: Compare one file's workarea/checkout against a selected revision, or compare two historical revisions using `file/#/rev`
   - Discard: Discard changes (with option to force discard all changes)
+  - Update: Update selected files or folders; folders use `updatesel` to avoid whole-workarea update
+  - SOS create file: Create selected file paths in SOS (`soscmd create <file_path>`)
   - Office open: Open the file in Office
   - Compile RTL: Compile the RTL code
   - Rebuild ctags: Rebuild ctags for the project
@@ -86,8 +87,16 @@ You can customize SOS commands in settings:
 - `cliosoft-sos-manager.commands.checkin.command`: Custom checkin command
 - `cliosoft-sos-manager.commands.diff.command`: Custom diff command
 - `cliosoft-sos-manager.commands.discard.command`: Custom discard command
+- `cliosoft-sos-manager.commands.update.command`: Custom update command
+- `cliosoft-sos-manager.commands.createFile.command`: Custom create file command
+- `cliosoft-sos-manager.soscmdTimeout`: SOS command timeout in seconds
 
-Use `${filePath}` as a placeholder for the file path in custom commands.
+Use these placeholders in custom commands:
+- `${filePath}`: selected file path
+- `${filePath1}` / `${filePath2}`: SOS revision pathnames used by Diff Two SOS Revisions
+- `${revision1}` / `${revision2}`: selected SOS revision IDs
+
+SOS `diff` accepts at most two pathnames of the **same file**. Multi-file Diff therefore runs `soscmd diff -gui <file>` once per file. Do not treat two different files as the two sides of one SOS diff.
 
 ## Troubleshooting
 
@@ -100,10 +109,10 @@ Use `${filePath}` as a placeholder for the file path in custom commands.
 - A: Make sure the file is in a directory managed by ClioSoft SOS (contains `.sos` directory).
 
 **Q: Slow performance in large projects**
-- A: v0.2.0 includes significant performance improvements. Make sure you're using the latest version.
+- A: Use the status bar toggle to pause automatic refresh when needed. Single-file SOS operations use targeted folder refresh; manual Changed Files refresh performs the full workspace scan and shows completion/failure notification. Debug logs include per-command timing and summarize large outputs.
 
-**Q: Status not updating**
-- A: Check the status bar - you may have paused automatic refresh. Click the status bar item to resume.
+**Q: Changed Files global scan has no result**
+- A: Click the refresh button in the Changed Files view. The scan shows a notification when it completes or fails. The global scan uses documented SOS select options: `soscmd status * -sco -suco -sncm -sne -snt`.
 
 ### Debug Mode
 
@@ -185,7 +194,13 @@ For issues or questions:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 
-### v0.2.0 (Latest)
+### v0.45.0 (Latest)
+- Added SOS create file context-menu command
+- Added Changed Files full-scan success/failure notifications
+- Fixed Changed Files global scan selector with documented SOS options (`-sco -suco -sncm -sne -snt`)
+- Improved folder/file target handling for checkout, checkin, discard, and update
+- Added SOS command timing and timeout diagnostics
+
 - Major bug fixes and performance improvements
 - User-friendly error messages
 - Progress notifications

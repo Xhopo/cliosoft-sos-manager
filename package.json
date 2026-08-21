@@ -2,7 +2,7 @@
   "name": "cliosoft-sos-manager",
   "displayName": "ClioSoft SOS Manager",
   "description": "VSCode extension for ClioSoft SOS Manager, allowing users to view and switch file versions",
-  "version": "0.2.0",
+  "version": "0.47.0",
   "publisher": "xhopo",
   "author": "xhopo with trae",
   "icon": "resources/cliosoft-icon.png",
@@ -17,18 +17,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:cliosoft-sos-manager.checkout",
-    "onCommand:cliosoft-sos-manager.checkin",
-    "onCommand:cliosoft-sos-manager.diff",
-    "onCommand:cliosoft-sos-manager.discard",
-    "onCommand:cliosoft-sos-manager.officeOpen",
-    "onCommand:cliosoft-sos-manager.compileRtl",
-    "onCommand:cliosoft-sos-manager.rebuildCtags",
-    "onCommand:cliosoft-sos-manager.quickCheckout",
-    "onCommand:cliosoft-sos-manager.quickCheckin",
-    "onCommand:cliosoft-sos-manager.quickDiscard",
-    "onView:cliosoft-sos-manager.fileVersions",
-    "onView:cliosoft-sos-manager.filteredStatus"
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -45,12 +34,27 @@
       },
       {
         "command": "cliosoft-sos-manager.diff",
-        "title": "Diff the current file with last version",
+        "title": "Diff selected files with SOS default revision",
+        "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.diffRevisions",
+        "title": "Diff Two SOS Revisions",
         "category": "ClioSoft SOS"
       },
       {
         "command": "cliosoft-sos-manager.discard",
         "title": "Discard the current file without lock",
+        "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.update",
+        "title": "Update selected files or folders",
+        "category": "ClioSoft SOS"
+      },
+      {
+        "command": "cliosoft-sos-manager.createFile",
+        "title": "SOS create file",
         "category": "ClioSoft SOS"
       },
       {
@@ -145,9 +149,24 @@
           "group": "cliosoft-sos@3"
         },
         {
+          "command": "cliosoft-sos-manager.diffRevisions",
+          "when": "viewItem == filteredFile",
+          "group": "cliosoft-sos@3"
+        },
+        {
           "command": "cliosoft-sos-manager.discard",
           "when": "viewItem == filteredFile",
           "group": "cliosoft-sos@4"
+        },
+        {
+          "command": "cliosoft-sos-manager.update",
+          "when": "viewItem == filteredFile",
+          "group": "cliosoft-sos@5"
+        },
+        {
+          "command": "cliosoft-sos-manager.createFile",
+          "when": "viewItem == filteredFile",
+          "group": "cliosoft-sos@6"
         },
         {
           "command": "cliosoft-sos-manager.checkout",
@@ -163,9 +182,56 @@
           "command": "cliosoft-sos-manager.discard",
           "when": "viewItem == filteredFolder",
           "group": "cliosoft-sos@4"
+        },
+        {
+          "command": "cliosoft-sos-manager.update",
+          "when": "viewItem == filteredFolder",
+          "group": "cliosoft-sos@5"
         }
       ],
       "editor/context": [
+        {
+          "command": "cliosoft-sos-manager.checkout",
+          "group": "cliosoft-sos@1",
+          "when": "resourceScheme == file || editorLangId != ''"
+        },
+        {
+          "command": "cliosoft-sos-manager.checkin",
+          "group": "cliosoft-sos@2",
+          "when": "resourceScheme == file || editorLangId != ''"
+        },
+        {
+          "command": "cliosoft-sos-manager.diff",
+          "group": "cliosoft-sos@3",
+          "when": "resourceScheme == file || editorLangId != ''"
+        },
+        {
+          "command": "cliosoft-sos-manager.diffRevisions",
+          "group": "cliosoft-sos@3",
+          "when": "resourceScheme == file || editorLangId != ''"
+        },
+        {
+          "command": "cliosoft-sos-manager.discard",
+          "group": "cliosoft-sos@4",
+          "when": "resourceScheme == file || editorLangId != ''"
+        },
+        {
+          "command": "cliosoft-sos-manager.update",
+          "group": "cliosoft-sos@5",
+          "when": "resourceScheme == file || editorLangId != ''"
+        },
+        {
+          "command": "cliosoft-sos-manager.createFile",
+          "group": "cliosoft-sos@6",
+          "when": "resourceScheme == file || editorLangId != ''"
+        },
+        {
+          "command": "cliosoft-sos-manager.officeOpen",
+          "group": "cliosoft-sos@7",
+          "when": "resourceScheme == file || editorLangId != ''"
+        }
+      ],
+      "editor/title/context": [
         {
           "command": "cliosoft-sos-manager.checkout",
           "group": "cliosoft-sos@1",
@@ -182,8 +248,28 @@
           "when": "resourceScheme == file"
         },
         {
+          "command": "cliosoft-sos-manager.diffRevisions",
+          "group": "cliosoft-sos@3",
+          "when": "resourceScheme == file"
+        },
+        {
           "command": "cliosoft-sos-manager.discard",
           "group": "cliosoft-sos@4",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "cliosoft-sos-manager.update",
+          "group": "cliosoft-sos@5",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "cliosoft-sos-manager.createFile",
+          "group": "cliosoft-sos@6",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "cliosoft-sos-manager.officeOpen",
+          "group": "cliosoft-sos@7",
           "when": "resourceScheme == file"
         }
       ],
@@ -214,6 +300,16 @@
           "when": "resourceScheme == file"
         },
         {
+          "command": "cliosoft-sos-manager.diff",
+          "group": "cliosoft-sos@3",
+          "when": "multipleResources"
+        },
+        {
+          "command": "cliosoft-sos-manager.diffRevisions",
+          "group": "cliosoft-sos@3",
+          "when": "resourceScheme == file"
+        },
+        {
           "command": "cliosoft-sos-manager.discard",
           "group": "cliosoft-sos@4",
           "when": "resourceScheme == file"
@@ -224,17 +320,32 @@
           "when": "multipleResources"
         },
         {
-          "command": "cliosoft-sos-manager.officeOpen",
+          "command": "cliosoft-sos-manager.update",
           "group": "cliosoft-sos@5",
           "when": "resourceScheme == file"
         },
         {
+          "command": "cliosoft-sos-manager.createFile",
+          "group": "cliosoft-sos@6",
+          "when": "resourceScheme == file"
+        },
+        {
+          "command": "cliosoft-sos-manager.update",
+          "group": "cliosoft-sos@5",
+          "when": "multipleResources"
+        },
+        {
+          "command": "cliosoft-sos-manager.officeOpen",
+          "group": "cliosoft-sos@6",
+          "when": "resourceScheme == file"
+        },
+        {
           "command": "cliosoft-sos-manager.compileRtl",
-          "group": "cliosoft-sos@6"
+          "group": "cliosoft-sos@7"
         },
         {
           "command": "cliosoft-sos-manager.rebuildCtags",
-          "group": "cliosoft-sos@7"
+          "group": "cliosoft-sos@8"
         }
       ]
     },
@@ -307,6 +418,26 @@
           "default": "",
           "description": "Custom discard command"
         },
+        "cliosoft-sos-manager.commands.update.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable update command in context menu"
+        },
+        "cliosoft-sos-manager.commands.update.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom update command"
+        },
+        "cliosoft-sos-manager.commands.createFile.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable create file command in context menu"
+        },
+        "cliosoft-sos-manager.commands.createFile.command": {
+          "type": "string",
+          "default": "",
+          "description": "Custom create file command"
+        },
         "cliosoft-sos-manager.commands.officeOpen.enable": {
           "type": "boolean",
           "default": true,
@@ -355,6 +486,13 @@
           "minimum": 30,
           "maximum": 3600,
           "description": "Folder status cache expiry time (in seconds)"
+        },
+        "cliosoft-sos-manager.soscmdTimeout": {
+          "type": "number",
+          "default": 60,
+          "minimum": 5,
+          "maximum": 600,
+          "description": "Timeout for each SOS command (in seconds)"
         },
         "cliosoft-sos-manager.enableDiskCache": {
           "type": "boolean",

@@ -2,7 +2,7 @@ import { exec, spawn } from 'child_process';
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { isDebugEnabled, logDebug, logError, showSosError } from './utils';
+import { isDebugEnabled, logDebug, logError, showSosError, getSoscmdTimeout } from './utils';
 
 // 定义文件版本接口
 export interface FileVersion {
@@ -24,6 +24,52 @@ export interface FileStatus {
     author: string;    // 作者
     time: string;      // 时间
     log: string;       // 日志
+}
+
+function isInterestingStatus(status: FileStatus): boolean {
+    return status.state === 'O'
+        || status.state === 'W'
+        || status.change === 'M'
+        || status.change === '!'
+        || status.newRevision === 'N';
+}
+
+function summarizeCommandOutput(output: string): string {
+    if (!output) {
+        return '<empty>';
+    }
+
+    const lines = output.split('\n');
+    const nonEmptyLines = lines.filter(line => line.trim().length > 0);
+    const maxPreviewLines = 12;
+
+    if (output.length <= 4000 && nonEmptyLines.length <= maxPreviewLines) {
+        return output;
+    }
+
+    const previewLines = nonEmptyLines.slice(0, 6);
+    const tailLines = nonEmptyLines.slice(-3);
+    const omitted = Math.max(nonEmptyLines.length - previewLines.length - tailLines.length, 0);
+
+    return [
+        `<${output.length} chars, ${nonEmptyLines.length} non-empty lines>`,
+        ...previewLines,
+        ...(omitted > 0 ? [`... ${omitted} lines omitted ...`] : []),
+        ...tailLines
+    ].join('\n');
+}
+
+/**
+ * 快速比较两个 FileStatus 是否相同（避免 JSON.stringify 开销）
+ */
+export function isStatusEqual(a: FileStatus, b: FileStatus): boolean {
+    return a.type === b.type
+        && a.state === b.state
+        && a.change === b.change
+        && a.lock === b.lock
+        && a.newRevision === b.newRevision
+        && a.revision === b.revision
+        && a.path === b.path;
 }
 
 /**
@@ -79,6 +125,18 @@ export function executeSoscmd(command: string, cwd?: string, showError?: boolean
 export function executeSoscmd(args: string[], cwd?: string, showError?: boolean): Promise<string>;
 export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, showError: boolean = true): Promise<string> {
     return new Promise((resolve, reject) => {
+        const timeout = getSoscmdTimeout();
+        const startTime = Date.now();
+        const commandLabel = Array.isArray(commandOrArgs)
+            ? `soscmd ${commandOrArgs.join(' ')}`
+            : commandOrArgs;
+
+        const finishDebug = (result: 'success' | 'failed' | 'error' | 'timeout'): void => {
+            if (isDebugEnabled()) {
+                logDebug(`SOS command ${result} after ${Date.now() - startTime}ms: ${commandLabel}`);
+            }
+        };
+
         if (Array.isArray(commandOrArgs)) {
             // 使用spawn方式执行命令
             if (isDebugEnabled()) {
@@ -88,17 +146,29 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
                 }
             }
             
-            const proc = spawn('soscmd', commandOrArgs, { cwd, shell: true, timeout: 60000 });
+            const proc = spawn('soscmd', commandOrArgs, { cwd });
             let stdout = '';
             let stderr = '';
+            let settled = false;
+            const timeoutHandle = setTimeout(() => {
+                if (settled) { return; }
+                settled = true;
+                proc.kill();
+                finishDebug('timeout');
+                const errorMessage = `SOS command timed out after ${timeout / 1000}s: ${commandLabel}`;
+                if (showError) {
+                    logError(errorMessage);
+                    showSosError(errorMessage);
+                } else {
+                    logDebug(errorMessage);
+                }
+                reject(new Error(errorMessage));
+            }, timeout);
             
             proc.stdout.on('data', (data) => {
                 stdout += data.toString();
-                if (isDebugEnabled()) {
-                    logDebug(`stdout chunk: ${data.toString()}`);
-                }
             });
-            
+
             proc.stderr.on('data', (data) => {
                 stderr += data.toString();
                 if (isDebugEnabled()) {
@@ -107,14 +177,18 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
             });
             
             proc.on('close', (code) => {
+                if (settled) { return; }
+                settled = true;
+                clearTimeout(timeoutHandle);
                 if (isDebugEnabled()) {
                     logDebug(`Process exited with code: ${code}`);
-                    logDebug(`Full stdout: ${stdout}`);
+                    logDebug(`Command stdout: ${summarizeCommandOutput(stdout)}`);
                     if (stderr) {
-                        logDebug(`Full stderr: ${stderr}`);
+                        logDebug(`Command stderr: ${summarizeCommandOutput(stderr)}`);
                     }
                 }
                 if (code !== 0) {
+                    finishDebug('failed');
                     const userFriendlyError = getUserFriendlyError(stderr || stdout, commandOrArgs[0]);
                     const errorMessage = `SOS command failed: ${userFriendlyError}`;
 
@@ -131,14 +205,19 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
                 if (stderr && isDebugEnabled()) {
                     logDebug(`Command completed with stderr: ${stderr}`);
                 }
-                
+
                 if (isDebugEnabled()) {
                     logDebug(`Command executed successfully`);
                 }
+                finishDebug('success');
                 resolve(stdout);
             });
 
             proc.on('error', (error) => {
+                if (settled) { return; }
+                settled = true;
+                clearTimeout(timeoutHandle);
+                finishDebug('error');
                 const errorMessage = `Failed to execute soscmd: ${error.message}`;
                 if (showError) {
                     logError(errorMessage);
@@ -158,17 +237,18 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
                 }
             }
             
-            exec(command, { cwd, maxBuffer: 10 * 1024 * 1024, timeout: 60000 }, (error, stdout, stderr) => {
+            exec(command, { cwd, maxBuffer: 10 * 1024 * 1024, timeout }, (error, stdout, stderr) => {
                 let errorMessage = '';
                 
                 if (isDebugEnabled()) {
-                    logDebug(`Command stdout: ${stdout}`);
+                    logDebug(`Command stdout: ${summarizeCommandOutput(stdout)}`);
                     if (stderr) {
-                        logDebug(`Command stderr: ${stderr}`);
+                        logDebug(`Command stderr: ${summarizeCommandOutput(stderr)}`);
                     }
                 }
                 
                 if (error) {
+                    finishDebug(error.killed ? 'timeout' : 'failed');
                     const userFriendlyError = getUserFriendlyError(stderr || stdout, command.split(' ')[1]);
                     errorMessage = `SOS command failed: ${userFriendlyError}`;
 
@@ -189,6 +269,7 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
                 if (isDebugEnabled()) {
                     logDebug(`Command executed successfully`);
                 }
+                finishDebug('success');
                 resolve(stdout);
             });
         }
@@ -212,14 +293,7 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
             logDebug(`File name: ${fileName}`);
         }
         
-        // 构建soscmd命令，查询文件版本
-        const command = `soscmd history -fs "${filePath}"`;
-        
-        if (isDebugEnabled()) {
-            logDebug(`Building command: ${command}`);
-        }
-        
-        const output = await executeSoscmd(command, fileDir, false);
+        const output = await executeSoscmd(['history', '-fs', filePath], fileDir, false);
         
         // 检查文件是否在sos管理下
         if (output.includes('@@ Error: Client: No valid objects selected for \'history\' operation.')) {
@@ -290,10 +364,6 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
 
 // 解析单个状态行
 export function parseStatusLine(statusLine: string): FileStatus | null {
-    if (isDebugEnabled()) {
-        logDebug(`Parsing status line: ${statusLine}`);
-    }
-
     const normalizedLine = statusLine.replace(/\t/g, ' ');
 
     // 统一正则：类型(fpdsFPDS) + 状态5字符 + 空白 + 版本号 + 空白 + 路径
@@ -355,18 +425,10 @@ export async function getFileStatus(filePath: string): Promise<FileStatus | null
             return null;
         }
         
-        // 获取文件所在目录作为工作目录，使用相对路径调用soscmd status
         const fileDir = path.dirname(filePath);
         const fileName = path.basename(filePath);
-        const command = `soscmd status ${fileName}`;
-        
-        if (isDebugEnabled()) {
-            logDebug(`Building status command: ${command}`);
-            logDebug(`Working directory: ${fileDir}`);
-        }
-        
-        // 调用executeSoscmd时不显示错误信息，因为文件可能不在SOS管理下
-        const output = await executeSoscmd(command, fileDir, false);
+
+        const output = await executeSoscmd(['status', fileName], fileDir, false);
         
         // 解析命令输出
         const lines = output.trim().split('\n');
@@ -412,7 +474,8 @@ export async function getFolderStatus(folderPath: string): Promise<Map<string, F
             logDebug(`getFolderStatus called with folderPath: ${folderPath}`);
         }
 
-        const output = await executeSoscmd(['status', '*'], folderPath, false);
+        // 使用 exec（字符串形式）而非 spawn，让 shell 展开 * 通配符
+        const output = await executeSoscmd('soscmd status *', folderPath, false);
         const lines = output.trim().split('\n');
 
         for (const line of lines) {
@@ -423,9 +486,14 @@ export async function getFolderStatus(folderPath: string): Promise<Map<string, F
             const status = parseStatusLine(line);
             if (!status) { continue; }
 
-            const filePath = path.isAbsolute(status.path)
-                ? status.path
-                : path.join(folderPath, status.path);
+            let filePath: string;
+            if (path.isAbsolute(status.path)) {
+                filePath = status.path;
+            } else {
+                // soscmd status * 返回的路径是从项目根开始的相对路径（如 ./a/b/file.sv），
+                // 但执行 CWD 就是 folderPath，文件一定在该目录下，取 basename 拼接
+                filePath = path.join(folderPath, path.basename(status.path));
+            }
             statusMap.set(filePath, { ...status, path: filePath });
         }
 
@@ -448,16 +516,18 @@ export async function getFolderStatus(folderPath: string): Promise<Map<string, F
 export async function getInterestingStatus(
     workspaceRoot: string,
     cancellationToken?: vscode.CancellationToken
-): Promise<Map<string, FileStatus>> {
+): Promise<Map<string, FileStatus> | undefined> {
     const statusMap = new Map<string, FileStatus>();
 
     if (cancellationToken?.isCancellationRequested) { return statusMap; }
 
     try {
-        // -sco: checked out, -suco: checked out without lock
-        // status 命令默认 OR 模式，select 参数自带递归
+        // status 命令多个 select option 默认 OR；-sr 递归隐含开启。
+        // -sco: checked out, -suco: checked out without lock, -sncm: not checked out but modified,
+        // -sne: missing from workarea, -snt: needs update icon.
+        // 使用 exec（字符串形式）而非 spawn，让 shell 展开 * 通配符。
         const output = await executeSoscmd(
-            ['status', '*', '-sco', '-suco'],
+            'soscmd status * -sco -suco -sncm -sne -snt',
             workspaceRoot,
             false
         );
@@ -471,7 +541,7 @@ export async function getInterestingStatus(
             }
 
             const status = parseStatusLine(line);
-            if (!status) { continue; }
+            if (!status || !isInterestingStatus(status)) { continue; }
 
             // 输出路径是相对路径（如 ./design_data/xxx），转为绝对路径
             let filePath = status.path;
@@ -491,6 +561,7 @@ export async function getInterestingStatus(
         if (isDebugEnabled()) {
             logError(`getInterestingStatus failed: ${error instanceof Error ? error.message : String(error)}`);
         }
+        return undefined;
     }
 
     return statusMap;
@@ -538,8 +609,7 @@ export async function switchFileVersion(filePath: string, versionId: string): Pr
                 logDebug(`User confirmed discard operation`);
             }
 
-            const discardCommand = `soscmd discard -F "${filePath}"`;
-            await executeSoscmd(discardCommand, fileDir);
+            await executeSoscmd(['discard', '-F', filePath], fileDir);
             if (isDebugEnabled()) {
                 logDebug(`discard command executed successfully`);
             }
@@ -558,12 +628,7 @@ export async function switchFileVersion(filePath: string, versionId: string): Pr
         }
 
         // 执行 userev（文件未 checkout 或已 discard 后）
-        const userevCommand = `soscmd userev "${filePath}/${versionId}"`;
-        if (isDebugEnabled()) {
-            logDebug(`Executing userev command: ${userevCommand}`);
-        }
-
-        await executeSoscmd(userevCommand, fileDir);
+        await executeSoscmd(['userev', `${filePath}/${versionId}`], fileDir);
         vscode.window.showInformationMessage(`Successfully switched to version ${versionId}`);
 
         if (isDebugEnabled()) {

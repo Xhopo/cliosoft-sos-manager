@@ -43,9 +43,11 @@ class FilteredStatusItem extends vscode.TreeItem {
         public readonly absolutePath: string,
         public readonly isDirectory: boolean,
         public readonly fileStatus: FileStatus | null,
-        collapsibleState: vscode.TreeItemCollapsibleState
+        collapsibleState: vscode.TreeItemCollapsibleState,
+        childFileCount?: number
     ) {
         super(path.basename(absolutePath), collapsibleState);
+        this.id = absolutePath;
         this.resourceUri = vscode.Uri.file(absolutePath);
 
         if (!isDirectory && fileStatus) {
@@ -58,6 +60,7 @@ class FilteredStatusItem extends vscode.TreeItem {
             };
             this.contextValue = 'filteredFile';
         } else {
+            this.description = childFileCount !== undefined ? `(${childFileCount})` : '';
             this.tooltip = absolutePath;
             this.contextValue = 'filteredFolder';
         }
@@ -76,6 +79,7 @@ export class FilteredStatusTreeDataProvider implements vscode.TreeDataProvider<F
     private treeIndex = new Map<string, Set<string>>();
     // 记录匹配的文件路径，用于区分文件和文件夹
     private interestingFiles = new Set<string>();
+    private rebuildTimer: NodeJS.Timeout | undefined;
 
     constructor(
         private readonly workspaceRoot: string,
@@ -83,9 +87,29 @@ export class FilteredStatusTreeDataProvider implements vscode.TreeDataProvider<F
     ) {}
 
     /**
-     * 从 statusCache 重建过滤树
+     * 防抖 rebuild：短时间内多次调用只执行一次
      */
     rebuild(): void {
+        if (this.rebuildTimer) { clearTimeout(this.rebuildTimer); }
+        this.rebuildTimer = setTimeout(() => {
+            this.rebuildTimer = undefined;
+            this.doRebuild();
+        }, 100);
+    }
+
+    /**
+     * 同步立即 rebuild，跳过防抖。
+     * 用于 decoration fire 之前确保 interestingFiles 数据已更新。
+     */
+    rebuildSync(): void {
+        if (this.rebuildTimer) {
+            clearTimeout(this.rebuildTimer);
+            this.rebuildTimer = undefined;
+        }
+        this.doRebuild();
+    }
+
+    private doRebuild(): void {
         this.treeIndex.clear();
         this.interestingFiles.clear();
 
@@ -123,6 +147,25 @@ export class FilteredStatusTreeDataProvider implements vscode.TreeDataProvider<F
         return this.interestingFiles.size === 0;
     }
 
+    hasFile(filePath: string): boolean {
+        return this.interestingFiles.has(filePath);
+    }
+
+    getParent(element: FilteredStatusItem): FilteredStatusItem | null {
+        if (!element.absolutePath) { return null; }
+        const parentPath = path.dirname(element.absolutePath);
+        if (parentPath === this.workspaceRoot || parentPath.length < this.workspaceRoot.length) {
+            return null;
+        }
+        return new FilteredStatusItem(parentPath, true, null, vscode.TreeItemCollapsibleState.Expanded);
+    }
+
+    findItem(filePath: string): FilteredStatusItem | undefined {
+        if (!this.interestingFiles.has(filePath)) { return undefined; }
+        const status = this.statusCacheRef.get(filePath) || null;
+        return new FilteredStatusItem(filePath, false, status, vscode.TreeItemCollapsibleState.None);
+    }
+
     getTreeItem(element: FilteredStatusItem): vscode.TreeItem {
         return element;
     }
@@ -158,22 +201,22 @@ export class FilteredStatusTreeDataProvider implements vscode.TreeDataProvider<F
     private buildItems(childPaths: Set<string>): FilteredStatusItem[] {
         const items: FilteredStatusItem[] = [];
         for (const childPath of childPaths) {
-            // 如果路径在 treeIndex 中有子节点且不是 interesting 文件本身，则为文件夹
             const hasChildren = this.treeIndex.has(childPath);
             const isInteresting = this.interestingFiles.has(childPath);
             const isDirectory = hasChildren && !isInteresting;
 
             const status = this.statusCacheRef.get(childPath) || null;
+            const childFileCount = isDirectory ? this.getInterestingFileCount(childPath) : undefined;
             items.push(new FilteredStatusItem(
                 childPath,
                 isDirectory,
                 isDirectory ? null : status,
                 isDirectory
                     ? vscode.TreeItemCollapsibleState.Expanded
-                    : vscode.TreeItemCollapsibleState.None
+                    : vscode.TreeItemCollapsibleState.None,
+                childFileCount
             ));
         }
-        // 排序：文件夹在前，然后按名称字母排序
         items.sort((a, b) => {
             if (a.isDirectory !== b.isDirectory) { return a.isDirectory ? -1 : 1; }
             return path.basename(a.absolutePath).localeCompare(path.basename(b.absolutePath));
