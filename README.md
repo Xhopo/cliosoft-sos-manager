@@ -4,14 +4,12 @@
 
 This VSCode extension integrates with ClioSoft SOS Manager, providing file status decorations in Explorer and allowing users to view and switch between different versions of files.
 
-## What's New in v0.47.0
+## What's New in v0.48.0
 
-**Multi-file Diff & Same-file Revision Compare**
+**Shortcuts in any editor & honest Discard**
 
-- 📁 Explorer / Changed Files multi-select now diffs each file with `soscmd diff -gui <file>`, one by one
-- 🔀 Added **Diff Two SOS Revisions**: workarea/checkout vs one history revision, or two revisions via `file/#/rev`
-- 🚫 Different files are never passed as the two sides of a single `soscmd diff`
-- 🧾 Custom diff commands can use `${filePath}`, `${filePath1}`, `${filePath2}`, `${revision1}`, `${revision2}`
+- ⌨️ Quick commands (Check Out / Check In / Discard) now also work when a file is open in a **non-text editor** (e.g. Hex Editor for binary/unsupported files): the keybinding no longer requires a focused text editor, and the active file is resolved from the active tab
+- 🧹 **Discard no longer reports a false success** for files that are *modified without a checkout* (SOS `-sncm` state, e.g. `f-M---`). Such files cannot be discarded because there is no checkout lock. The extension detects them and offers **Update**, which restores the file via a consistency-check Selective Update (`soscmd updatesel -ccw`) and keeps the modified copy as `.SVM`
 
 See [CHANGELOG.md](CHANGELOG.md) for full details.
 
@@ -35,7 +33,7 @@ See [CHANGELOG.md](CHANGELOG.md) for full details.
   - Check in: Check in selected files with comments
   - Diff: Compare each selected file with its SOS default revision (`soscmd diff -gui <file>`). Multiple files are compared one by one, not against each other
   - Diff Two SOS Revisions: Compare one file's workarea/checkout against a selected revision, or compare two historical revisions using `file/#/rev`
-  - Discard: Discard changes (with option to force discard all changes)
+  - Discard: Discard changes (with option to force discard all changes). Files modified without a checkout (`-sncm`) are steered to Update instead, since `soscmd discard` cannot revert them
   - Update: Update selected files or folders; folders use `updatesel` to avoid whole-workarea update
   - SOS create file: Create selected file paths in SOS (`soscmd create <file_path>`)
   - Office open: Open the file in Office
@@ -107,6 +105,9 @@ SOS `diff` accepts at most two pathnames of the **same file**. Multi-file Diff t
 
 **Q: "File is not under SOS version control" error**
 - A: Make sure the file is in a directory managed by ClioSoft SOS (contains `.sos` directory).
+
+**Q: A file shows Modified (M) but "Discard" doesn't revert it**
+- A: The file is modified *without a checkout* (SOS `-sncm` state, e.g. `f-M---`). `soscmd discard` only reverts files that are checked out, so there is nothing for it to discard. Use **Update** — the extension runs `soscmd updatesel -ccw`, a consistency-check Selective Update that restores the file and keeps the modified copy as `.SVM`.
 
 **Q: Slow performance in large projects**
 - A: Use the status bar toggle to pause automatic refresh when needed. Single-file SOS operations use targeted folder refresh; manual Changed Files refresh performs the full workspace scan and shows completion/failure notification. Debug logs include per-command timing and summarize large outputs.
@@ -194,7 +195,14 @@ For issues or questions:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 
-### v0.45.0 (Latest)
+### v0.48.0 (Latest)
+- Quick-command shortcuts now work in non-text editors (e.g. Hex Editor) by resolving the active file from the active tab
+- Discard detects files modified without checkout (`-sncm`) and routes them to Update (`soscmd updatesel -ccw`, consistency check, modified copy kept as `.SVM`) instead of reporting a false success
+
+### v0.47.0
+- Multi-file Diff (`soscmd diff -gui <file>` per file) and **Diff Two SOS Revisions** (`file/#/rev`)
+
+### v0.45.0
 - Added SOS create file context-menu command
 - Added Changed Files full-scan success/failure notifications
 - Fixed Changed Files global scan selector with documented SOS options (`-sco -suco -sncm -sne -snt`)

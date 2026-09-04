@@ -26,7 +26,7 @@ SOS（Software & IP Lifecycle Management）是半导体 / IC 设计行业常用�
 | 字段 | 值 |
 |------|----|
 | 扩展 ID | `xhopo.cliosoft-sos-manager` |
-| 当前版本 | 0.47.0 |
+| 当前版本 | 0.48.0 |
 | VS Code 最低版本 | 1.85.0 |
 | 目标平台 | Linux（`soscmd` 仅在 Linux 上可用） |
 | 语言 | TypeScript |
@@ -43,7 +43,7 @@ SOS（Software & IP Lifecycle Management）是半导体 / IC 设计行业常用�
 | Check In | 检入文件，弹出输入框填写 Log | `Ctrl+Alt+I` |
 | Diff | 对每个选中文件执行 `soscmd diff -gui <file>`，与 SOS 默认版本比较 | — |
 | Diff Two SOS Revisions | 选择 1 个 revision 与 workarea 比较，或选择 2 个 revision 互相比较 | — |
-| Discard | 丢弃检出，可选 `-F`（强制覆盖） | `Ctrl+Alt+D` |
+| Discard | 丢弃检出，可选 `-F`（强制覆盖）。对"未 checkout 但本地已改"（`-sncm`）的文件会引导走 Update | `Ctrl+Alt+D` |
 | Office Open | 用 LibreOffice 等打开文件 | — |
 | Rebuild Ctags | 重建项目 ctags 索引 | — |
 
@@ -52,6 +52,8 @@ SOS（Software & IP Lifecycle Management）是半导体 / IC 设计行业常用�
 - **编辑器右键菜单**
 - **Changed Files 树视图右键**（文件 / 文件夹批量）
 - **键盘快捷键**（Quick 命令系列）
+
+快捷键在**非文本编辑器**（如 Hex Viewer 打开二进制/不支持的文件）中同样生效：不要求 `editorTextFocus`，活动文件从当前活动标签页解析。
 
 多文件操作自动分批（每批 50 个），带进度条和取消支持。
 
@@ -245,7 +247,7 @@ soscmd.ts
 
 ## 7. 各模块详解
 
-### 7.1 `extension.ts`（835 行）— 总装层
+### 7.1 `extension.ts`（1212 行）— 总装层
 
 **activate() 做了什么：**
 
@@ -261,12 +263,13 @@ soscmd.ts
 
 | 函数 | 作用 |
 |------|------|
-| `resolveCommandUris(arg0, arg1)` | 统一处理四种命令调用来源（Explorer 右键、树视图、快捷键），返回 Uri 数组 |
+| `resolveCommandUris(arg0, arg1)` | 统一处理命令调用来源（Explorer 右键、树视图、快捷键、活动文件），返回 Uri 数组 |
+| `getActiveFileUri()` | 解析活动文件 URI：优先 `activeTextEditor`，否则回退到活动标签页（覆盖 Hex Viewer 等非文本编辑器） |
 | `revertFileInEditor(filePath)` | 版本切换 / Discard 后重新从磁盘加载文件，消除编辑器 dirty dot |
 | `refreshFileStatus(filePaths, decorator)` | 批量清除缓存并触发状态更新 |
 | `executeBatchCommand(...)` | 批量执行 SOS 命令，带进度条和取消支持 |
 
-### 7.2 `fileStatusDecorator.ts`（443 行）— 状态中心
+### 7.2 `fileStatusDecorator.ts`（440 行）— 状态中心
 
 `FileStatusDecorator` 是整个扩展的核心类，它：
 
@@ -298,10 +301,10 @@ toggleRefresh()                 暂停/恢复
 
 - **单文件快速路径**：`getFileStatus()` 查单个文件，200ms 防抖
 - **目录批量**：`getFolderStatus()` 查所在目录所有文件状态，带 `cacheExpiryTime` 秒缓存
-- **全量 interesting 扫描**：`getInterestingStatus()` 用 `soscmd status * -sco -suco` 递归查所有检出文件
+- **全量 interesting 扫描**：`getInterestingStatus()` 用 `soscmd status * -sco -suco -sncm -sne -snt` 递归查所有值得关注的文件（检出 / 无锁检出 / 未检出但已改 / 缺失 / 有新版本）
 - **精确 decoration 刷新**：`doUpdateFolderStatus` 只 fire 变化文件及其祖先文件夹的 Uri（而非全量 `undefined`）
 
-### 7.3 `fileVersionsTree.ts`（117 行）— 版本树
+### 7.3 `fileVersionsTree.ts`（146 行）— 版本树
 
 两个类：
 
@@ -313,7 +316,7 @@ toggleRefresh()                 暂停/恢复
   - `setFile(path)` 设置当前文件并刷新
   - `getChildren()` 调用 `getFileVersions()` 获取版本列表
 
-### 7.4 `filteredStatusTree.ts`（238 行）— Changed Files 投影
+### 7.4 `filteredStatusTree.ts`（258 行）— Changed Files 投影
 
 **设计原则：只读投影，不触发刷新。**
 
@@ -339,7 +342,7 @@ status.state === 'O'           // Checked Out
 | `getInterestingFileCount(folder)` | 文件夹 badge 数字来源 |
 | `isEmpty()` | 判断是否需要触发首次扫描 |
 
-### 7.5 `soscmd.ts`（575 行）— SOS 适配层
+### 7.5 `soscmd.ts`（646 行）— SOS 适配层
 
 **命令执行：**
 
@@ -371,11 +374,11 @@ f O M - N -  3  ./path/to/file
 |------|-------------|------|
 | `getFileStatus(path)` | `soscmd status <filename>` | `FileStatus \| null` |
 | `getFolderStatus(folder)` | `soscmd status *` | `Map<path, FileStatus>` |
-| `getInterestingStatus(root)` | `soscmd status * -sco -suco` | `Map<path, FileStatus>` |
+| `getInterestingStatus(root)` | `soscmd status * -sco -suco -sncm -sne -snt` | `Map<path, FileStatus>` |
 | `getFileVersions(path)` | `soscmd history -fs <path>` | `FileVersion[]` |
 | `switchFileVersion(path, ver)` | `soscmd discard -F` + `soscmd userev` | `boolean` |
 
-### 7.6 `utils.ts`（134 行）— 工具函数
+### 7.6 `utils.ts`（138 行）— 工具函数
 
 | 导出 | 说明 |
 |------|------|
@@ -516,3 +519,21 @@ npx @vscode/vsce package
 ~/.vscode/globalStorage/xhopo.cliosoft-sos-manager/statusCache.json
 ```
 设置 `enableDiskCache: false` 可禁用。
+
+### Q: 文件显示 M（已修改），但 Discard 无效 / 提示未 checkout？
+
+该文件属于 SOS `-sncm`（not checked out but modified）状态，例如状态行 `f-M---`：文件**未检出**（state `-`），但本地内容与服务器版本不同（change `M`）。大文件常见原因：最后一次 SOS 同步后被流程/工具重新生成过。
+
+这类文件 `soscmd discard` 找不到 checkout lock、无对象可撤，因此无法还原，也不应报成功。正确恢复是 **Selective Update 一致性检查**：
+
+```bash
+soscmd updatesel -ccw <file>
+```
+
+`-ccw` 会检查工作区一致性，把被改的本地文件备份为 `<file>.SVM`，并将工作区副本恢复到受管版本（状态行恢复为 `f-----`）。
+
+扩展在 v0.48 起已处理：对这类文件执行 Discard 时，会提示并引导改为 Update（内部执行上面的 `soscmd updatesel -ccw`），不再执行无用的 discard 或误报成功。
+
+### Q: 快捷键在 Hex Viewer / 非文本编辑器里失效？
+
+v0.48 起快捷键不再要求 `editorTextFocus`，且活动文件解析会回退到当前活动标签页（`getActiveFileUri`），因此 Quick Check Out / Check In / Discard 在非文本编辑器中也生效。注意文件必须通过标签页打开、且属于 `file` scheme。

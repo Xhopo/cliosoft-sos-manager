@@ -45,7 +45,7 @@ async function revertFileInEditor(filePath: string): Promise<void> {
  *  1. Explorer 右键菜单：(uri: Uri, uris: Uri[])
  *  2. Changed Files 树视图右键单选：(treeItem, [treeItem])
  *  3. Changed Files 树视图多选：(treeItem, [treeItem, treeItem, ...])
- *  4. 无参数（快捷键）：取 activeTextEditor
+ *  4. 无参数（快捷键）：取当前活动文件编辑器或非文本编辑器 tab 的 URI
  *
  * 文件夹节点保持为文件夹路径，不展开为内部文件。
  */
@@ -56,6 +56,21 @@ function uniqueUris(uris: vscode.Uri[]): vscode.Uri[] {
         seen.add(u.fsPath);
         return true;
     });
+}
+
+function getActiveFileUri(): vscode.Uri | undefined {
+    const editor = vscode.window.activeTextEditor;
+    if (editor && editor.document.uri.scheme === 'file') {
+        return editor.document.uri;
+    }
+
+    const activeTab = vscode.window.tabGroups.activeTabGroup?.activeTab;
+    const input = activeTab?.input as { uri?: vscode.Uri } | undefined;
+    if (input?.uri instanceof vscode.Uri && input.uri.scheme === 'file') {
+        return input.uri;
+    }
+
+    return undefined;
 }
 
 function resolveCommandUris(arg0: any, arg1: any): vscode.Uri[] {
@@ -84,9 +99,9 @@ function resolveCommandUris(arg0: any, arg1: any): vscode.Uri[] {
     if (arg0 && arg0.resourceUri instanceof vscode.Uri) {
         return [arg0.resourceUri];
     }
-    const editor = vscode.window.activeTextEditor;
-    if (editor && editor.document.uri.scheme === 'file') {
-        return [editor.document.uri];
+    const activeFileUri = getActiveFileUri();
+    if (activeFileUri) {
+        return [activeFileUri];
     }
     return [];
 }
@@ -573,6 +588,7 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
+            const resolveStartedAt = Date.now();
             const targetUris = resolveCommandUris(arg0, arg1);
             if (targetUris.length === 0) {
                 logDebug('No file paths to process');
@@ -580,7 +596,64 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             const filePaths = targetUris.map(u => u.fsPath);
+            if (isDebugEnabled()) {
+                logDebug(`Discard resolved ${filePaths.length} file(s) in ${Date.now() - resolveStartedAt}ms`);
+            }
 
+            // SOS 对"未 checkout 但本地已改/删除"的文件（如状态 f-M---）没有 checkout 可撤，
+            // `soscmd discard` 只会空转并输出 "not checked out / no checkout lock" 警告，文件不会还原。
+            // 这类文件的正确恢复是 Selective Update with consistency check（soscmd updatesel -ccw）：
+            // 一致性检查并把原文件备份为 .SVM。因此这里用状态缓存把这类目标从 discard 中拆出，
+            // 引导走带 -ccw 的 Update，而不是执行无用的 discard。
+            const statusCache = fileStatusDecorator.fileStatusCache;
+            const discardTargets: string[] = [];
+            const needUpdateTargets: string[] = [];
+            for (const fp of filePaths) {
+                const st = statusCache.get(fp);
+                const isModifiedWithoutCheckout = !!st
+                    && st.type === 'f'
+                    && st.state !== 'O' && st.state !== 'W'
+                    && (st.change === 'M' || st.change === '!');
+                if (isModifiedWithoutCheckout) {
+                    needUpdateTargets.push(fp);
+                } else {
+                    discardTargets.push(fp);
+                }
+            }
+
+            if (needUpdateTargets.length > 0) {
+                const skippedNames = needUpdateTargets.map(p => path.basename(p)).join(', ');
+                if (discardTargets.length === 0) {
+                    if (isDebugEnabled()) {
+                        logDebug(`Discard skipped (not checked out, modified): ${skippedNames}`);
+                    }
+                    const choice = await vscode.window.showWarningMessage(
+                        `'${skippedNames}' is not checked out but locally modified, so Discard cannot revert it. ` +
+                        'Run Update to restore it via Selective Update (soscmd updatesel -ccw; the modified copy is saved as .SVM).',
+                        'Update files',
+                        'Cancel'
+                    );
+                    if (choice === 'Update files') {
+                        const uris = needUpdateTargets.map(p => vscode.Uri.file(p));
+                        await vscode.commands.executeCommand(
+                            'cliosoft-sos-manager.update',
+                            uris[0],
+                            uris,
+                            { ccw: true }
+                        );
+                    }
+                    return;
+                }
+                vscode.window.showWarningMessage(
+                    `${skippedNames}: not checked out, Discard skipped for ${needUpdateTargets.length} file(s). ` +
+                    `Discarding the remaining ${discardTargets.length} file(s).`
+                );
+            }
+
+            if (isDebugEnabled()) {
+                logDebug(`Discard showing confirmation for ${discardTargets[0]}`);
+            }
+            const promptStartedAt = Date.now();
             const selectedOption = await vscode.window.showQuickPick([
                 { label: 'Yes (discard all changes)', value: true },
                 { label: 'No (keep local changes)', value: false }
@@ -588,6 +661,9 @@ export function activate(context: vscode.ExtensionContext) {
                 placeHolder: 'Do you want to use -F parameter to discard all changes?',
                 title: 'Discard Changes'
             });
+            if (isDebugEnabled()) {
+                logDebug(`Discard confirmation returned after ${Date.now() - promptStartedAt}ms`);
+            }
 
             if (!selectedOption) {
                 return;
@@ -595,14 +671,14 @@ export function activate(context: vscode.ExtensionContext) {
 
             const useForce = selectedOption.value;
 
-            const fileDir = path.dirname(filePaths[0]);
-            const fileNames = filePaths.map(p => path.basename(p)).join(', ');
+            const fileDir = path.dirname(discardTargets[0]);
+            const fileNames = discardTargets.map(p => path.basename(p)).join(', ');
 
             logDebug('Working directory:', fileDir);
             logDebug('File names:', fileNames);
 
             const results = await executeBatchCommand(
-                filePaths,
+                discardTargets,
                 fileDir,
                 (batch) => {
                     const customCmd = getCommandConfig('discard');
@@ -623,13 +699,13 @@ export function activate(context: vscode.ExtensionContext) {
                 logDebug(`Discard command completed with ${results.successCount} successes and ${results.failCount} failures`);
             }
 
-            await refreshCommandTargets(filePaths, fileStatusDecorator);
-            for (const fp of filePaths) { await revertFileInEditor(fp); }
+            await refreshCommandTargets(discardTargets, fileStatusDecorator);
+            for (const fp of discardTargets) { await revertFileInEditor(fp); }
         })
     );
 
     context.subscriptions.push(
-        vscode.commands.registerCommand('cliosoft-sos-manager.update', async (arg0: any, arg1: any) => {
+        vscode.commands.registerCommand('cliosoft-sos-manager.update', async (arg0: any, arg1: any, arg2?: { ccw?: boolean }) => {
             if (!isPlatformSupported()) {
                 await showPlatformWarning();
                 return;
@@ -639,6 +715,7 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
+            const withCcw = !!(arg2 && arg2.ccw);
             const targetUris = resolveCommandUris(arg0, arg1);
             if (targetUris.length === 0) {
                 logDebug('No file paths to update');
@@ -657,13 +734,18 @@ export function activate(context: vscode.ExtensionContext) {
                 : path.dirname(targetPaths[0]);
             const targetNames = targetPaths.map(p => path.basename(p)).join(', ');
 
+            // -ccw: check workarea consistency (existence/permissions of unchanged files).
+            // 处理"未 checkout 但本地已改"文件时需要它触发一致性检查并备份原文件为 .SVM。
+            const buildUpdateArgs = (objects: string[]): string[] =>
+                withCcw ? ['updatesel', '-ccw', ...objects] : ['updatesel', ...objects];
+
             let results: { successCount: number; failCount: number; errors: any[] };
             if (folderTargets.length === 1 && fileTargets.length === 0) {
                 const customCmd = getCommandConfig('update');
                 const folderName = path.basename(folderTargets[0]);
                 const cmdOrArgs = customCmd
                     ? replaceCommandVariables(customCmd, { filePath: folderTargets[0] })
-                    : ['updatesel', folderName];
+                    : buildUpdateArgs([folderName]);
                 results = await executeBatchCommand([folderTargets[0]], fileDir, () => cmdOrArgs, 'Update');
             } else if (folderTargets.length > 0) {
                 vscode.window.showWarningMessage('SOS update only supports one selected folder at a time. Please update folders one by one.');
@@ -675,7 +757,7 @@ export function activate(context: vscode.ExtensionContext) {
                     (batch) => {
                         const customCmd = getCommandConfig('update');
                         if (!customCmd) {
-                            return ['updatesel', ...batch];
+                            return buildUpdateArgs(batch);
                         } else {
                             return replaceCommandVariables(customCmd, { filePath: batch });
                         }
@@ -758,16 +840,11 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            let filePath: string;
-            if (uri) {
-                filePath = uri.fsPath;
-            } else {
-                const editor = vscode.window.activeTextEditor;
-                if (!editor) {
-                    return;
-                }
-                filePath = editor.document.uri.fsPath;
+            const activeFileUri = uri || getActiveFileUri();
+            if (!activeFileUri) {
+                return;
             }
+            const filePath = activeFileUri.fsPath;
 
             const fileDir = path.dirname(filePath);
 
@@ -804,16 +881,11 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            let filePath: string;
-            if (uri) {
-                filePath = uri.fsPath;
-            } else {
-                const editor = vscode.window.activeTextEditor;
-                if (!editor) {
-                    return;
-                }
-                filePath = editor.document.uri.fsPath;
+            const activeFileUri = uri || getActiveFileUri();
+            if (!activeFileUri) {
+                return;
             }
+            const filePath = activeFileUri.fsPath;
 
             const fileDir = path.dirname(filePath);
 
@@ -847,50 +919,39 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    const NO_EDITOR_HINT = 'Shortcut not available for this file type. Please use the right-click context menu in Explorer instead.';
+    const NO_EDITOR_HINT = 'No active file found. Please focus a file editor or use the right-click context menu in Explorer.';
+
+    async function executeQuickFileCommand(command: string): Promise<void> {
+        const startedAt = Date.now();
+        const fileUri = getActiveFileUri();
+        if (!fileUri) {
+            vscode.window.showWarningMessage(NO_EDITOR_HINT);
+            return;
+        }
+        if (isDebugEnabled()) {
+            logDebug(`Quick command resolved active file in ${Date.now() - startedAt}ms: ${fileUri.fsPath}`);
+        }
+        await vscode.commands.executeCommand(command, fileUri, [fileUri]);
+        if (isDebugEnabled()) {
+            logDebug(`Quick command dispatched in ${Date.now() - startedAt}ms: ${command}`);
+        }
+    }
 
     context.subscriptions.push(
         vscode.commands.registerCommand('cliosoft-sos-manager.quickCheckout', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showWarningMessage(NO_EDITOR_HINT);
-                return;
-            }
-            await vscode.commands.executeCommand(
-                'cliosoft-sos-manager.checkout',
-                editor.document.uri,
-                [editor.document.uri]
-            );
+            await executeQuickFileCommand('cliosoft-sos-manager.checkout');
         })
     );
 
     context.subscriptions.push(
         vscode.commands.registerCommand('cliosoft-sos-manager.quickCheckin', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showWarningMessage(NO_EDITOR_HINT);
-                return;
-            }
-            await vscode.commands.executeCommand(
-                'cliosoft-sos-manager.checkin',
-                editor.document.uri,
-                [editor.document.uri]
-            );
+            await executeQuickFileCommand('cliosoft-sos-manager.checkin');
         })
     );
 
     context.subscriptions.push(
         vscode.commands.registerCommand('cliosoft-sos-manager.quickDiscard', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showWarningMessage(NO_EDITOR_HINT);
-                return;
-            }
-            await vscode.commands.executeCommand(
-                'cliosoft-sos-manager.discard',
-                editor.document.uri,
-                [editor.document.uri]
-            );
+            await executeQuickFileCommand('cliosoft-sos-manager.discard');
         })
     );
 

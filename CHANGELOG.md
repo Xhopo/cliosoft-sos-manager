@@ -4,6 +4,17 @@ All notable changes to the "ClioSoft SOS Manager" extension will be documented i
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-09-04
+
+### Added
+
+- Quick-command shortcuts (Quick Check Out / Check In / Discard) and active-file resolution now also work when a file is open in a non-text editor such as the Hex Editor. Keybindings no longer require `editorTextFocus`, and the active file URI falls back to the active tab when no text editor is focused.
+- Discard now detects files that are **modified without a checkout** (SOS state such as `f-M---`, reported through the `-sncm` select option). `soscmd discard` cannot revert such files, so the extension no longer runs a pointless discard or reports a false success; it prompts to run **Update**, which restores the file via a consistency-check Selective Update (`soscmd updatesel -ccw`) and keeps the modified copy as `.SVM`.
+
+### Changed
+
+- The Update command accepts an internal consistency-check flag and runs `soscmd updatesel -ccw <file>` when restoring files modified without checkout; normal Update from context menus / Changed Files keeps its previous behavior.
+
 ## [0.47.0] - 2026-08-19
 
 ### Added
