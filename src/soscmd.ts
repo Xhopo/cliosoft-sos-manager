@@ -358,7 +358,7 @@ export async function getFileVersions(filePath: string): Promise<FileVersion[]> 
         }
         
         // 检查是否是文件不在sos管理下的错误
-        if (error instanceof Error && error.message.includes('No valid objects selected for \'history\' operation')) {
+        if (isNotUnderSosError(error)) {
             // 文件不在sos管理下，返回空数组，不显示错误信息
             if (isDebugEnabled()) {
                 logDebug(`File is not under SOS control (from error)`);

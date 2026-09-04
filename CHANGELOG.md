@@ -4,6 +4,12 @@ All notable changes to the "ClioSoft SOS Manager" extension will be documented i
 
 ## [Unreleased]
 
+## [0.48.2] - 2026-09-04
+
+### Fixed
+
+- Retrieving a file's status / version history (`getFileVersions`, used by the File Versions panel) for a file that is **not under SOS version control** no longer shows an error — it returns an empty result silently. The not-under-SOS check now matches the translated error message instead of only the raw SOS text.
+
 ## [0.48.1] - 2026-09-04
 
 ### Fixed

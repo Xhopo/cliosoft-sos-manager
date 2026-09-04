@@ -26,7 +26,7 @@ SOS（Software & IP Lifecycle Management）是半导体 / IC 设计行业常用�
 | 字段 | 值 |
 |------|----|
 | 扩展 ID | `xhopo.cliosoft-sos-manager` |
-| 当前版本 | 0.48.1 |
+| 当前版本 | 0.48.2 |
 | VS Code 最低版本 | 1.85.0 |
 | 目标平台 | Linux（`soscmd` 仅在 Linux 上可用） |
 | 语言 | TypeScript |

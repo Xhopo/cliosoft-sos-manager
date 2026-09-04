@@ -4,9 +4,11 @@
 
 This VSCode extension integrates with ClioSoft SOS Manager, providing file status decorations in Explorer and allowing users to view and switch between different versions of files.
 
-## What's New in v0.48.1
+## What's New in v0.48.2
 
-**Quiet for non-SOS files + unmissable Discard prompt**
+- 🔕 **Querying file status / version history** for a file that is not under SOS version control is now silent too (no error, empty result)
+
+Previous (v0.48.1) — **Quiet for non-SOS files + unmissable Discard prompt**
 
 - 🔕 Commands (Checkout / Checkin / Discard / Update / Create / Diff) on files that are **not under SOS version control** no longer raise an error — they are silently skipped
 - 🧱 The Discard prompt for files *modified without a checkout* is now a **modal dialog**, so it can no longer be missed as a transient toast
@@ -200,7 +202,10 @@ For issues or questions:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 
-### v0.48.1 (Latest)
+### v0.48.2 (Latest)
+- Querying status / version history for files not under SOS version control is silent (empty result, no error)
+
+### v0.48.1
 - Commands on files not under SOS version control are silently skipped instead of raising an error
 - Discard prompt for files modified without checkout is now a modal dialog (cannot be missed)
 
