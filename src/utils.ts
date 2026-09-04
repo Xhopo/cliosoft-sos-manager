@@ -136,3 +136,13 @@ export function showSosError(message: string): void {
         }
     });
 }
+
+/**
+ * 判断某次 soscmd 失败是否只是因为目标文件不在 SOS 版本控制下。
+ * 这类情况应静默跳过（不弹错误、不计为失败），与 getFileStatus/getFileVersions 对非 SOS 文件返回空一致。
+ */
+export function isNotUnderSosError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('No valid objects selected')
+        || message.includes('not under SOS version control');
+}

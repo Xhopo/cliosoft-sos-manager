@@ -4,6 +4,17 @@ All notable changes to the "ClioSoft SOS Manager" extension will be documented i
 
 ## [Unreleased]
 
+## [0.48.1] - 2026-09-04
+
+### Fixed
+
+- Commands (Checkout / Checkin / Discard / Update / Create / Diff) on files that are **not under SOS version control** no longer raise an error — those files are silently skipped instead. Error notifications are suppressed for the "No valid objects selected" case both at the batch-command layer and in `executeSoscmd`.
+- The Discard prompt for files modified without a checkout is now a **modal dialog**, so it can no longer be missed when a non-modal toast is hidden behind a busy renderer or queued notifications.
+
+### Changed
+
+- Batch command results now track skipped (not-under-SOS) targets separately from real failures, and only report real failures.
+
 ## [0.48.0] - 2026-09-04
 
 ### Added

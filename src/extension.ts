@@ -3,7 +3,7 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { FileVersion, executeSoscmd, getFileVersions } from './soscmd';
-import { isDebugEnabled, logDebug, logError, isCommandEnabled, getCommandConfig, replaceCommandVariables, BATCH_SIZE, isPlatformSupported, showPlatformWarning, outputChannel, getConfig, showSosError } from './utils';
+import { isDebugEnabled, logDebug, logError, isCommandEnabled, getCommandConfig, replaceCommandVariables, BATCH_SIZE, isPlatformSupported, showPlatformWarning, outputChannel, getConfig, showSosError, isNotUnderSosError } from './utils';
 import { FilteredStatusTreeDataProvider } from './filteredStatusTree';
 import { FileStatusDecorator } from './fileStatusDecorator';
 import { FileVersionsTreeDataProvider } from './fileVersionsTree';
@@ -135,13 +135,44 @@ async function refreshCommandTargets(targetPaths: string[], fileStatusDecorator:
     }));
 }
 
+interface BatchCommandResult {
+    successCount: number;
+    failCount: number;
+    skippedCount: number;
+    errors: any[];
+}
+
+/**
+ * 汇总批量命令结果：全部成功→info；有真实失败→warning；其余（全部被跳过，
+ * 即目标不在 SOS 管理）→静默，不弹任何提示。
+ */
+function reportBatchResult(
+    successMessage: string,
+    results: BatchCommandResult,
+    successLog: string,
+    failPrefix: string
+): boolean {
+    if (results.failCount === 0 && results.successCount === 0) {
+        logDebug(`${failPrefix} skipped (targets not under SOS control)`);
+        return false;
+    }
+    if (results.failCount === 0) {
+        vscode.window.showInformationMessage(successMessage);
+        logDebug(successLog);
+    } else {
+        vscode.window.showWarningMessage(`${failPrefix} ${results.successCount} succeeded, ${results.failCount} failed.`);
+        logDebug(`${failPrefix} completed with ${results.successCount} successes and ${results.failCount} failures`);
+    }
+    return true;
+}
+
 async function executeBatchCommand(
     filePaths: string[],
     fileDir: string,
     buildArgs: (batch: string[]) => string | string[],
     commandName: string
-): Promise<{ successCount: number; failCount: number; errors: any[] }> {
-    const results = { successCount: 0, failCount: 0, errors: [] as any[] };
+): Promise<BatchCommandResult> {
+    const results: BatchCommandResult = { successCount: 0, failCount: 0, skippedCount: 0, errors: [] };
 
     if (filePaths.length > 1) {
         await vscode.window.withProgress({
@@ -158,11 +189,17 @@ async function executeBatchCommand(
             await executeSoscmd(cmdOrArgs as any, fileDir);
             results.successCount = filePaths.length;
         } catch (error) {
-            results.failCount = filePaths.length;
-            results.errors.push(error);
-            vscode.window.showErrorMessage(`${commandName} failed: ${error}`, 'Show Output').then(choice => {
-                if (choice === 'Show Output') { outputChannel.show(); }
-            });
+            if (isNotUnderSosError(error)) {
+                // 文件不在 SOS 管理：静默跳过，不报错
+                results.skippedCount = filePaths.length;
+                logDebug(`${commandName} skipped (not under SOS control): ${filePaths.join(', ')}`);
+            } else {
+                results.failCount = filePaths.length;
+                results.errors.push(error);
+                vscode.window.showErrorMessage(`${commandName} failed: ${error}`, 'Show Output').then(choice => {
+                    if (choice === 'Show Output') { outputChannel.show(); }
+                });
+            }
         }
     }
 
@@ -174,7 +211,7 @@ async function executeBatchCommandWithProgress(
     fileDir: string,
     buildArgs: (batch: string[]) => string | string[],
     commandName: string,
-    results: { successCount: number; failCount: number; errors: any[] },
+    results: BatchCommandResult,
     progress: vscode.Progress<{ message?: string; increment?: number }>,
     token: vscode.CancellationToken
 ): Promise<void> {
@@ -202,9 +239,14 @@ async function executeBatchCommandWithProgress(
             await executeSoscmd(cmdOrArgs as any, fileDir);
             results.successCount += batch.length;
         } catch (error) {
-            results.failCount += batch.length;
-            results.errors.push(error);
-            logError(`${commandName} batch ${batchNum}/${totalBatches} failed: ${error}`);
+            if (isNotUnderSosError(error)) {
+                results.skippedCount += batch.length;
+                logDebug(`${commandName} batch ${batchNum}/${totalBatches} skipped (not under SOS control)`);
+            } else {
+                results.failCount += batch.length;
+                results.errors.push(error);
+                logError(`${commandName} batch ${batchNum}/${totalBatches} failed: ${error}`);
+            }
         }
     }
 }
@@ -232,8 +274,8 @@ async function executeOneFileDiff(
     await executeSoscmd(['diff', '-gui', ...pathnames], fileDir);
 }
 
-async function executePerFileDiffs(filePaths: string[]): Promise<{ successCount: number; failCount: number; cancelled: boolean }> {
-    const results = { successCount: 0, failCount: 0, cancelled: false };
+async function executePerFileDiffs(filePaths: string[]): Promise<{ successCount: number; failCount: number; skippedCount: number; cancelled: boolean }> {
+    const results = { successCount: 0, failCount: 0, skippedCount: 0, cancelled: false };
 
     const runOne = async (filePath: string): Promise<void> => {
         logDebug('Diff command:', filePath);
@@ -245,10 +287,15 @@ async function executePerFileDiffs(filePaths: string[]): Promise<{ successCount:
             await runOne(filePaths[0]);
             results.successCount = 1;
         } catch (error) {
-            results.failCount = 1;
-            vscode.window.showErrorMessage(`Diff failed: ${error}`, 'Show Output').then(choice => {
-                if (choice === 'Show Output') { outputChannel.show(); }
-            });
+            if (isNotUnderSosError(error)) {
+                results.skippedCount = 1;
+                logDebug(`Diff skipped (not under SOS control): ${filePaths[0]}`);
+            } else {
+                results.failCount = 1;
+                vscode.window.showErrorMessage(`Diff failed: ${error}`, 'Show Output').then(choice => {
+                    if (choice === 'Show Output') { outputChannel.show(); }
+                });
+            }
         }
         return results;
     }
@@ -275,8 +322,13 @@ async function executePerFileDiffs(filePaths: string[]): Promise<{ successCount:
                 await runOne(filePath);
                 results.successCount += 1;
             } catch (error) {
-                results.failCount += 1;
-                logError(`Diff failed for ${filePath}: ${error}`);
+                if (isNotUnderSosError(error)) {
+                    results.skippedCount += 1;
+                    logDebug(`Diff skipped (not under SOS control): ${filePath}`);
+                } else {
+                    results.failCount += 1;
+                    logError(`Diff failed for ${filePath}: ${error}`);
+                }
             }
         }
     });
@@ -387,12 +439,13 @@ export function activate(context: vscode.ExtensionContext) {
                 'Checkout'
             );
 
-            if (results.failCount === 0) {
-                vscode.window.showInformationMessage(`Checked out: ${fileNames}`);
-                logDebug('Checkout command completed successfully');
-            } else {
-                vscode.window.showWarningMessage(`Checked out ${results.successCount} files, ${results.failCount} failed.`);
-                logDebug(`Checkout command completed with ${results.successCount} successes and ${results.failCount} failures`);
+            if (!reportBatchResult(
+                `Checked out: ${fileNames}`,
+                results,
+                'Checkout command completed successfully',
+                'Checkout'
+            )) {
+                return;
             }
 
             await refreshCommandTargets(filePaths, fileStatusDecorator);
@@ -454,12 +507,13 @@ export function activate(context: vscode.ExtensionContext) {
                 'Checkin'
             );
 
-            if (results.failCount === 0) {
-                vscode.window.showInformationMessage(`Checked in: ${fileNames}`);
-                logDebug('Checkin command completed successfully');
-            } else {
-                vscode.window.showWarningMessage(`Checked in ${results.successCount} files, ${results.failCount} failed.`);
-                logDebug(`Checkin command completed with ${results.successCount} successes and ${results.failCount} failures`);
+            if (!reportBatchResult(
+                `Checked in: ${fileNames}`,
+                results,
+                'Checkin command completed successfully',
+                'Checkin'
+            )) {
+                return;
             }
 
             await refreshCommandTargets(filePaths, fileStatusDecorator);
@@ -492,8 +546,10 @@ export function activate(context: vscode.ExtensionContext) {
             }
             if (results.cancelled) {
                 vscode.window.showWarningMessage(`Diff cancelled: ${results.successCount} succeeded, ${results.failCount} failed.`);
-            } else if (results.failCount === 0) {
+            } else if (results.failCount === 0 && results.successCount > 0) {
                 vscode.window.showInformationMessage(`Diff completed for ${results.successCount} files.`);
+            } else if (results.failCount === 0) {
+                logDebug('Diff skipped (targets not under SOS control)');
             } else {
                 vscode.window.showWarningMessage(`Diff completed: ${results.successCount} succeeded, ${results.failCount} failed.`, 'Show Output').then(choice => {
                     if (choice === 'Show Output') { outputChannel.show(); }
@@ -627,20 +683,36 @@ export function activate(context: vscode.ExtensionContext) {
                     if (isDebugEnabled()) {
                         logDebug(`Discard skipped (not checked out, modified): ${skippedNames}`);
                     }
+                    // 用模态对话框，避免非模态 toast 被大文件渲染/通知排队吞掉而用户看不到。
                     const choice = await vscode.window.showWarningMessage(
-                        `'${skippedNames}' is not checked out but locally modified, so Discard cannot revert it. ` +
-                        'Run Update to restore it via Selective Update (soscmd updatesel -ccw; the modified copy is saved as .SVM).',
+                        `'${skippedNames}' is not checked out but locally modified, so Discard cannot revert it.\n\n` +
+                        'Run Update to restore it via Selective Update (soscmd updatesel -ccw)?\n' +
+                        'The modified copy is saved as <file>.SVM during the consistency check.',
+                        { modal: true },
                         'Update files',
                         'Cancel'
                     );
                     if (choice === 'Update files') {
-                        const uris = needUpdateTargets.map(p => vscode.Uri.file(p));
-                        await vscode.commands.executeCommand(
-                            'cliosoft-sos-manager.update',
-                            uris[0],
-                            uris,
-                            { ccw: true }
-                        );
+                        if (isDebugEnabled()) {
+                            logDebug(`Discard: user chose Update for ${skippedNames}`);
+                        }
+                        try {
+                            const uris = needUpdateTargets.map(p => vscode.Uri.file(p));
+                            await vscode.commands.executeCommand(
+                                'cliosoft-sos-manager.update',
+                                uris[0],
+                                uris,
+                                { ccw: true }
+                            );
+                        } catch (error) {
+                            const errorMsg = `Failed to run Update: ${error instanceof Error ? error.message : String(error)}`;
+                            logError(errorMsg);
+                            vscode.window.showErrorMessage(errorMsg, 'Show Output').then(showChoice => {
+                                if (showChoice === 'Show Output') { outputChannel.show(); }
+                            });
+                        }
+                    } else if (isDebugEnabled()) {
+                        logDebug(`Discard: user declined Update for ${skippedNames}`);
                     }
                     return;
                 }
@@ -691,12 +763,13 @@ export function activate(context: vscode.ExtensionContext) {
                 'Discard'
             );
 
-            if (results.failCount === 0) {
-                vscode.window.showInformationMessage(`Discarded: ${fileNames}`);
-                logDebug('Discard command completed successfully');
-            } else {
-                vscode.window.showWarningMessage(`Discarded ${results.successCount} files, ${results.failCount} failed.`);
-                logDebug(`Discard command completed with ${results.successCount} successes and ${results.failCount} failures`);
+            if (!reportBatchResult(
+                `Discarded: ${fileNames}`,
+                results,
+                'Discard command completed successfully',
+                'Discard'
+            )) {
+                return;
             }
 
             await refreshCommandTargets(discardTargets, fileStatusDecorator);
@@ -739,7 +812,7 @@ export function activate(context: vscode.ExtensionContext) {
             const buildUpdateArgs = (objects: string[]): string[] =>
                 withCcw ? ['updatesel', '-ccw', ...objects] : ['updatesel', ...objects];
 
-            let results: { successCount: number; failCount: number; errors: any[] };
+            let results: BatchCommandResult;
             if (folderTargets.length === 1 && fileTargets.length === 0) {
                 const customCmd = getCommandConfig('update');
                 const folderName = path.basename(folderTargets[0]);
@@ -766,12 +839,13 @@ export function activate(context: vscode.ExtensionContext) {
                 );
             }
 
-            if (results.failCount === 0) {
-                vscode.window.showInformationMessage(`Updated: ${targetNames}`);
-                logDebug('Update command completed successfully');
-            } else {
-                vscode.window.showWarningMessage(`Updated ${results.successCount} files or folders, ${results.failCount} failed.`);
-                logDebug(`Update command completed with ${results.successCount} successes and ${results.failCount} failures`);
+            if (!reportBatchResult(
+                `Updated: ${targetNames}`,
+                results,
+                'Update command completed successfully',
+                'Update'
+            )) {
+                return;
             }
 
             await refreshCommandTargets(targetPaths, fileStatusDecorator);
@@ -817,12 +891,13 @@ export function activate(context: vscode.ExtensionContext) {
                 'Create file'
             );
 
-            if (results.failCount === 0) {
-                vscode.window.showInformationMessage(`SOS created: ${fileNames}`);
-                logDebug('Create file command completed successfully');
-            } else {
-                vscode.window.showWarningMessage(`SOS created ${results.successCount} files, ${results.failCount} failed.`);
-                logDebug(`Create file command completed with ${results.successCount} successes and ${results.failCount} failures`);
+            if (!reportBatchResult(
+                `SOS created: ${fileNames}`,
+                results,
+                'Create file command completed successfully',
+                'Create file'
+            )) {
+                return;
             }
 
             await refreshCommandTargets(filePaths, fileStatusDecorator);

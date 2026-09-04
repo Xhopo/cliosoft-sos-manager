@@ -2,7 +2,7 @@ import { exec, spawn } from 'child_process';
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { isDebugEnabled, logDebug, logError, showSosError, getSoscmdTimeout } from './utils';
+import { isDebugEnabled, logDebug, logError, showSosError, getSoscmdTimeout, isNotUnderSosError } from './utils';
 
 // 定义文件版本接口
 export interface FileVersion {
@@ -193,8 +193,13 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
                     const errorMessage = `SOS command failed: ${userFriendlyError}`;
 
                     if (showError) {
-                        logError(`Command: soscmd ${commandOrArgs.join(' ')}\nExit code: ${code}\nOutput: ${stdout}\nError: ${stderr}`);
-                        showSosError(errorMessage);
+                        if (isNotUnderSosError(errorMessage)) {
+                            // 文件不在 SOS 管理：不弹错误，仅 debug 记录
+                            logDebug(`Command failed (not under SOS control, suppressed): soscmd ${commandOrArgs.join(' ')}`);
+                        } else {
+                            logError(`Command: soscmd ${commandOrArgs.join(' ')}\nExit code: ${code}\nOutput: ${stdout}\nError: ${stderr}`);
+                            showSosError(errorMessage);
+                        }
                     } else {
                         logDebug(`Command failed (suppressed): soscmd ${commandOrArgs.join(' ')}`);
                     }
@@ -253,8 +258,13 @@ export function executeSoscmd(commandOrArgs: string | string[], cwd?: string, sh
                     errorMessage = `SOS command failed: ${userFriendlyError}`;
 
                     if (showError) {
-                        logError(`Command: ${command}\nWorking directory: ${cwd || 'N/A'}\nOutput: ${stdout}\nError: ${stderr}`);
-                        showSosError(errorMessage);
+                        if (isNotUnderSosError(errorMessage)) {
+                            // 文件不在 SOS 管理：不弹错误，仅 debug 记录
+                            logDebug(`Command failed (not under SOS control, suppressed): ${command}`);
+                        } else {
+                            logError(`Command: ${command}\nWorking directory: ${cwd || 'N/A'}\nOutput: ${stdout}\nError: ${stderr}`);
+                            showSosError(errorMessage);
+                        }
                     } else {
                         logDebug(`Command failed (suppressed): ${command}`);
                     }

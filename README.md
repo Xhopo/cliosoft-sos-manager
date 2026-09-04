@@ -4,9 +4,14 @@
 
 This VSCode extension integrates with ClioSoft SOS Manager, providing file status decorations in Explorer and allowing users to view and switch between different versions of files.
 
-## What's New in v0.48.0
+## What's New in v0.48.1
 
-**Shortcuts in any editor & honest Discard**
+**Quiet for non-SOS files + unmissable Discard prompt**
+
+- 🔕 Commands (Checkout / Checkin / Discard / Update / Create / Diff) on files that are **not under SOS version control** no longer raise an error — they are silently skipped
+- 🧱 The Discard prompt for files *modified without a checkout* is now a **modal dialog**, so it can no longer be missed as a transient toast
+
+Previous (v0.48.0) — **Shortcuts in any editor & honest Discard**
 
 - ⌨️ Quick commands (Check Out / Check In / Discard) now also work when a file is open in a **non-text editor** (e.g. Hex Editor for binary/unsupported files): the keybinding no longer requires a focused text editor, and the active file is resolved from the active tab
 - 🧹 **Discard no longer reports a false success** for files that are *modified without a checkout* (SOS `-sncm` state, e.g. `f-M---`). Such files cannot be discarded because there is no checkout lock. The extension detects them and offers **Update**, which restores the file via a consistency-check Selective Update (`soscmd updatesel -ccw`) and keeps the modified copy as `.SVM`
@@ -195,7 +200,11 @@ For issues or questions:
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 
-### v0.48.0 (Latest)
+### v0.48.1 (Latest)
+- Commands on files not under SOS version control are silently skipped instead of raising an error
+- Discard prompt for files modified without checkout is now a modal dialog (cannot be missed)
+
+### v0.48.0
 - Quick-command shortcuts now work in non-text editors (e.g. Hex Editor) by resolving the active file from the active tab
 - Discard detects files modified without checkout (`-sncm`) and routes them to Update (`soscmd updatesel -ccw`, consistency check, modified copy kept as `.SVM`) instead of reporting a false success
 
